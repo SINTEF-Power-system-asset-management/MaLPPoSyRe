@@ -18,8 +18,8 @@ from torch_geometric.nn import GCNConv, global_mean_pool
 set_up: Csv file containing the line capacity between the areas for each, used as edge weights in the graph
 cost: The total cost values for each scenario defined as the deseried variable y.
 """
-set_up = pd.read_csv('prev_line_caps.csv')
-cost = pd.read_csv('tot_exp_cost.csv')
+set_up = pd.read_csv("prev_line_caps.csv")
+cost = pd.read_csv("tot_exp_cost.csv")
 
 """ In order to both shuffle the dataset and transform it, the datapoints from the csv
 file, including the total cost and the line capacity, has to be shuffled in the same
@@ -27,10 +27,16 @@ order as to not mix the values up as they are connected to each other.
 """
 y_list = []
 edge_index_list = []
-for i in range(len(cost.iloc[0:, 1])-1):
-    y_list.append(cost['Total expected cost'].iloc[i])
-    edge_index_list.append([set_up['Line10'].iloc[i + 1]/100, set_up['Line11'].iloc[i + 1]/100, 
-                            set_up['Line18'].iloc[i + 1]/100, set_up['Line19'].iloc[i + 1]/100])
+for i in range(len(cost.iloc[0:, 1]) - 1):
+    y_list.append(cost["Total expected cost"].iloc[i])
+    edge_index_list.append(
+        [
+            set_up["Line10"].iloc[i + 1] / 100,
+            set_up["Line11"].iloc[i + 1] / 100,
+            set_up["Line18"].iloc[i + 1] / 100,
+            set_up["Line19"].iloc[i + 1] / 100,
+        ]
+    )
 
 temp = list(zip(y_list, edge_index_list))
 random.shuffle(temp)
@@ -49,7 +55,7 @@ the PowerTransformer method from scikit learn. The training set is both fitted a
 before it is reshaped back to its original form"""
 y_train = np.array(y_train)
 y_train = y_train.reshape((len(y_train), 1))
-pt = PowerTransformer(method='box-cox', standardize=True)
+pt = PowerTransformer(method="box-cox", standardize=True)
 y_train_transformed = pt.fit_transform(y_train)
 y_train_transformed = y_train_transformed.reshape(-1)
 
@@ -70,15 +76,15 @@ a list of datapoints and then create the datasets from those.
 training_set = []
 test_set = []
 # data_list = []
-for i in range(len(cost.iloc[0:, 1])-1):
+for i in range(len(cost.iloc[0:, 1]) - 1):
     """
     Loop used to create the dataset
-    
+
     Edge_attribute: Edge Feature matrix
     edge_index    : Graph connectivity in coo format, explains how each node is connected
     y             : The total expected cost value. The goal is to minimize this value
     data_list     : The list containing the datapoints
-    
+
     This loop creates all the graphs and describes the topology and the features of the edges
     It also defines the features such as capacity of the edges.
     """
@@ -89,18 +95,19 @@ for i in range(len(cost.iloc[0:, 1])-1):
         edge_index = edge_index.type(torch.long)
         edge_attribute = torch.Tensor(edge_index_list[i])
         # edge_attribute = torch.Tensor([set_up['Line10'].iloc[i + 1], set_up['Line11'].iloc[i + 1], set_up['Line18'].iloc[i + 1], set_up['Line19'].iloc[i + 1]])
-        training_set.append(Data(x=x, edge_index=edge_index, edge_attr=edge_attribute, y=y))
-    
+        training_set.append(
+            Data(x=x, edge_index=edge_index, edge_attr=edge_attribute, y=y)
+        )
+
     else:
-        y = torch.Tensor([[y_test_transformed[i-split_value]]])
+        y = torch.Tensor([[y_test_transformed[i - split_value]]])
         x = torch.Tensor([[1], [1], [1]])
         edge_index = torch.Tensor([[0, 0, 1, 1], [1, 2, 2, 2]])
         edge_index = edge_index.type(torch.long)
-        edge_attribute = torch.Tensor(edge_index_list[i-split_value])
+        edge_attribute = torch.Tensor(edge_index_list[i - split_value])
         # edge_attribute = torch.Tensor([set_up['Line10'].iloc[i + 1], set_up['Line11'].iloc[i + 1], set_up['Line18'].iloc[i + 1], set_up['Line19'].iloc[i + 1]])
         test_set.append(Data(x=x, edge_index=edge_index, edge_attr=edge_attribute, y=y))
-    
-    
+
     """
     #y = torch.Tensor([[cost['Total expected cost'].iloc[i]]])
     y = torch.Tensor([[y_normalized[i]]])
@@ -132,14 +139,16 @@ test_dataset = DataLoader(test_set, batch_size=1)
 """
 # %%
 torch.manual_seed(12345)
-print(f'Number of training graphs: {len(training_dataset)}')
-print(f'Number of test graphs: {len(test_dataset)}')
+print(f"Number of training graphs: {len(training_dataset)}")
+print(f"Number of test graphs: {len(test_dataset)}")
 # %%
 """
 Here we create the Graph Convolutional Network Machine Learning Model.
 
 The model is initalized by inheriting from the GCN module from Pytorch.
 """
+
+
 class GCN(torch.nn.Module):
     def __init__(self, data_example, hidden_channels=8, dropout_rate=0):
         super(GCN, self).__init__()
@@ -166,24 +175,24 @@ class GCN(torch.nn.Module):
         self.conv2 = GCNConv(hidden_channels, hidden_channels)
         self.lin = Linear(hidden_channels, 1)
         self.dropout_rate = dropout_rate
-        
+
     def forward(self, data):
         """
         Forward function which passes the data through the neural network.
-        
+
         Args:
             x           : Nodes
             edge_index  : Topology of the graph
             edge_weight : Weight of each edge
-            
+
         For each pass through a layer, a Rectified Linear Unit (relu) is applied.
-        A global_mean_pool function is applied to find the global mean in the 
+        A global_mean_pool function is applied to find the global mean in the
         batch pool.
         Lastly, a dropout function is used to drop certain values to prevent
         overfitting
         """
         # 1. Obtain node embeddings
-        x, edge_index, edge_weight = data.x, data.edge_index, data.edge_attr 
+        x, edge_index, edge_weight = data.x, data.edge_index, data.edge_attr
         x = self.conv1(x, edge_index, edge_weight)
         x = x.relu()
         # x = F.dropout(x, training=self.training)
@@ -198,14 +207,16 @@ class GCN(torch.nn.Module):
 
 
 # %%
-data_example = next(iter(training_dataset))  # getting an example graph to get dimensions
-model = GCN(data_example, hidden_channels=25, dropout_rate = 0.5)
+data_example = next(
+    iter(training_dataset)
+)  # getting an example graph to get dimensions
+model = GCN(data_example, hidden_channels=25, dropout_rate=0.5)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 criterion = torch.nn.MSELoss()
 
+
 def train():
-    
-    
+
     model.train()
     for data in training_dataset:  # Iterate in batches over the training dataset.
         out = model(data)
@@ -213,21 +224,21 @@ def train():
         loss.backward()  # Derive gradients.
         optimizer.step()  # Update parameters based on gradients.
         optimizer.zero_grad()  # Clear gradients.
-    
+
+
 def test(loader):
-    
-    
+
     model.eval()
     SE = 0
-    for data in loader: # Iterate in batches over the training/test dataset
-        out = model(data) # define the output value
-        SE += (out - data.y)**2 #Sum over the SE
+    for data in loader:  # Iterate in batches over the training/test dataset
+        out = model(data)  # define the output value
+        SE += (out - data.y) ** 2  # Sum over the SE
     RMSE = torch.sqrt(SE / len(loader.dataset))
-    return RMSE # Finally we return the RMSE
-     
+    return RMSE  # Finally we return the RMSE
+
+
 def plotter(loader):
-    
-    
+
     model.eval()
     y_pred = []
     y_target = []
@@ -242,7 +253,6 @@ def plotter(loader):
     return y_pred, y_target, x_values
 
 
-
 # %%
 epoch_list = []
 train_list = []
@@ -251,7 +261,9 @@ for epoch in range(1, 100):
     train()
     train_acc = test(training_dataset)
     test_acc = test(test_dataset)
-    print(f'Epoch: {epoch:03d}, Train Acc: {train_acc[0][0]:.4f}, Test Acc: {test_acc[0][0]:.4f}')
+    print(
+        f"Epoch: {epoch:03d}, Train Acc: {train_acc[0][0]:.4f}, Test Acc: {test_acc[0][0]:.4f}"
+    )
     epoch_list.append(epoch)
     train_list.append(train_acc[0][0].detach().numpy())
     test_list.append(test_acc[0][0].detach().numpy())
@@ -268,23 +280,32 @@ for epoch in range(1, 100):
 
 # %%
 y_pred, y_target, x_values = plotter(test_dataset)
-plt.plot(x_values, y_pred, color='red', label='Predicted value')
-plt.plot(x_values, y_target, color='green', label='Target Value')
-plt.xlabel('Scenario')
-plt.ylabel('Normalized Cost Value')
-plt.legend(bbox_to_anchor=(0., 1.02, 1., .102), loc='lower left',
-           ncol=2, mode="expand", borderaxespad=0.)
+plt.plot(x_values, y_pred, color="red", label="Predicted value")
+plt.plot(x_values, y_target, color="green", label="Target Value")
+plt.xlabel("Scenario")
+plt.ylabel("Normalized Cost Value")
+plt.legend(
+    bbox_to_anchor=(0.0, 1.02, 1.0, 0.102),
+    loc="lower left",
+    ncol=2,
+    mode="expand",
+    borderaxespad=0.0,
+)
 plt.show()
 
 
-
 # %%
-plt.plot(epoch_list,train_list, color='blue', label='Training set')
-plt.plot(epoch_list, test_list, color='red', label='Test set')
-plt.xlabel('Epoch')
-plt.ylabel('Relative Mean Square Error (RMSE)')
-plt.legend(bbox_to_anchor=(0., 1.02, 1., .102), loc='lower left',
-           ncol=2, mode="expand", borderaxespad=0.)
+plt.plot(epoch_list, train_list, color="blue", label="Training set")
+plt.plot(epoch_list, test_list, color="red", label="Test set")
+plt.xlabel("Epoch")
+plt.ylabel("Relative Mean Square Error (RMSE)")
+plt.legend(
+    bbox_to_anchor=(0.0, 1.02, 1.0, 0.102),
+    loc="lower left",
+    ncol=2,
+    mode="expand",
+    borderaxespad=0.0,
+)
 # plt.savefig("/Users/fredrikha/Workplace/graphconvolutional/Results GCN/Iteration 1/graph_3_hidden_layers.png")
 plt.show()
 
@@ -299,16 +320,26 @@ dropout_rate_list = []
 epoch_list = []
 
 for i in range(30):
-    lr = random.randrange(1,101)/10000 # Here we find a random learnig rate value in the range of []
-    hidden_channels = random.randrange(5,51) # Here we find a random hidden_channel value in the range of 5-50
-    dropout_rate = random.randrange(0,10)/20 # Here we find a random dropout_rate value in the range of 0 and 1
-    #epoch = random.randrange(10,50) #Here we find a random epoch value in the range of 10 and 50
+    lr = (
+        random.randrange(1, 101) / 10000
+    )  # Here we find a random learnig rate value in the range of []
+    hidden_channels = random.randrange(
+        5, 51
+    )  # Here we find a random hidden_channel value in the range of 5-50
+    dropout_rate = (
+        random.randrange(0, 10) / 20
+    )  # Here we find a random dropout_rate value in the range of 0 and 1
+    # epoch = random.randrange(10,50) #Here we find a random epoch value in the range of 10 and 50
     epoch = 30
-    
-    model = GCN(data_example, hidden_channels=hidden_channels, dropout_rate = dropout_rate) # Here we initalize our GCN model
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr) # We define the optimizer 
-    criterion = torch.nn.MSELoss() # And we define the criterion-type, Mean square error loss in our case.
-    
+
+    model = GCN(
+        data_example, hidden_channels=hidden_channels, dropout_rate=dropout_rate
+    )  # Here we initalize our GCN model
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)  # We define the optimizer
+    criterion = (
+        torch.nn.MSELoss()
+    )  # And we define the criterion-type, Mean square error loss in our case.
+
     """
     
     """
@@ -325,12 +356,12 @@ for i in range(30):
         """
         if min_rmse_train == 0 and min_rmse_test == 0:
             min_rmse_train = current_rmse_train
-            min_rmse_test = current_rmse_test 
+            min_rmse_test = current_rmse_test
         """Here the minimum value for the train & test rmse is changed if the current value is smaller than the current min value
         """
         if current_rmse_train < min_rmse_train:
-            min_rmse_train = current_rmse_train 
-        
+            min_rmse_train = current_rmse_train
+
         if current_rmse_test < min_rmse_test:
             min_rmse_test = current_rmse_test
         """Here I create the option to break out of the loop if the solution converges
@@ -342,18 +373,24 @@ for i in range(30):
             previous_rmse_test = current_rmse_test
             continue
         break
-            
+
     min_rmse_train_list.append(min_rmse_train)
     min_rmse_test_list.append(min_rmse_test)
     lr_list.append(lr)
     hidden_channels_list.append(hidden_channels)
     dropout_rate_list.append(dropout_rate)
     epoch_list.append(epoch)
-    
+
 for i in range(len(lr_list)):
-    print(f'Min RMSE Test: {min_rmse_test_list[i]:.7f}, Min RMSE Train: {min_rmse_train_list[i]:.7f}')
-    print(f'obtained with a learning rate of: {lr_list[i]:.4f}, a hidden channel nr of: {hidden_channels_list[i]:03d}')
-    print(f'a dropout rate of: {dropout_rate_list[i]:.4f} and an epoch number of: {epoch_list[i]:03d}')
+    print(
+        f"Min RMSE Test: {min_rmse_test_list[i]:.7f}, Min RMSE Train: {min_rmse_train_list[i]:.7f}"
+    )
+    print(
+        f"obtained with a learning rate of: {lr_list[i]:.4f}, a hidden channel nr of: {hidden_channels_list[i]:03d}"
+    )
+    print(
+        f"a dropout rate of: {dropout_rate_list[i]:.4f} and an epoch number of: {epoch_list[i]:03d}"
+    )
 
 """
 Here I find the index of the minimum value of the RMSE. This is done this way
@@ -365,17 +402,23 @@ min_rmse = 0
 for i in range(len(min_rmse_test_list)):
     if min_rmse == 0:
         min_rmse = min_rmse_test_list[i]
-        
+
     if min_rmse_test_list[i] < min_rmse:
         print("hei")
         min_rmse = min_rmse_test_list[i]
         value = i
-        
+
 print(min_rmse)
 print(value)
 
-print(f"The lowest total RMSE value, {min_rmse_test_list[value]:.7f}, for the test set was found with the following settings: ")
-print(f'a learning rate of: {lr_list[value]:.4f}, a hidden channel nr of: {hidden_channels_list[value]:03d}')
-print(f'a dropout rate of: {dropout_rate_list[value]:.4f} and an epoch number of: {epoch_list[value]:03d}')
+print(
+    f"The lowest total RMSE value, {min_rmse_test_list[value]:.7f}, for the test set was found with the following settings: "
+)
+print(
+    f"a learning rate of: {lr_list[value]:.4f}, a hidden channel nr of: {hidden_channels_list[value]:03d}"
+)
+print(
+    f"a dropout rate of: {dropout_rate_list[value]:.4f} and an epoch number of: {epoch_list[value]:03d}"
+)
 
 # %%
