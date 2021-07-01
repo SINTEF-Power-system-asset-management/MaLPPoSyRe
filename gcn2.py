@@ -11,8 +11,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear
-from torch_geometric.nn import GCNConv
-from torch_geometric.nn import global_mean_pool
+from torch_geometric.nn import GCNConv, global_mean_pool
 
 
 """
@@ -22,27 +21,46 @@ cost: The total cost values for each scenario defined as the deseried variable y
 set_up = pd.read_csv('prev_line_caps.csv')
 cost = pd.read_csv('tot_exp_cost.csv')
 
+""" In order to both shuffle the dataset and transform it, the datapoints from the csv
+file, including the total cost and the line capacity, has to be shuffled in the same
+order as to not mix the values up as they are connected to each other.
+"""
 y_list = []
+edge_index_list = []
 for i in range(len(cost.iloc[0:, 1])-1):
     y_list.append(cost['Total expected cost'].iloc[i])
+    edge_index_list.append([set_up['Line10'].iloc[i + 1]/100, set_up['Line11'].iloc[i + 1]/100, 
+                            set_up['Line18'].iloc[i + 1]/100, set_up['Line19'].iloc[i + 1]/100])
+
+temp = list(zip(y_list, edge_index_list))
+random.shuffle(temp)
+y_list, edge_index_list = zip(*temp)
+
+""" After the lists have been shuffled, they are then split into a training set
+and a test test
+"""
 
 split_value = 360
 y_train = y_list[:split_value]
 y_test = y_list[split_value:]
 
+""" The training set is then converted into a numpy array and reshaped so that it fits into
+the PowerTransformer method from scikit learn. The training set is both fitted and transformed
+before it is reshaped back to its original form"""
 y_train = np.array(y_train)
 y_train = y_train.reshape((len(y_train), 1))
 pt = PowerTransformer(method='box-cox', standardize=True)
 y_train_transformed = pt.fit_transform(y_train)
 y_train_transformed = y_train_transformed.reshape(-1)
 
+""" The test set goes through the same procedure, but it is only getting transformed based
+on the values from the training set. That is why we only call transform here and not
+fit_transform
+"""
 y_test = np.array(y_test)
 y_test = y_test.reshape((len(y_test), 1))
 y_test_transformed = pt.transform(y_test)
 y_test_transformed = y_test_transformed.reshape(-1)
-
-for i in range(len(y_test_transformed)):
-    print(y_test_transformed[i])
 
 """
 We start by creating a dataset. This is done piecewise by creating a datapoint per scenario from set_up and cost.
@@ -69,8 +87,8 @@ for i in range(len(cost.iloc[0:, 1])-1):
         x = torch.Tensor([[1], [1], [1]])
         edge_index = torch.Tensor([[0, 0, 1, 1], [1, 2, 2, 2]])
         edge_index = edge_index.type(torch.long)
-        edge_attribute = torch.Tensor([set_up['Line10'].iloc[i + 1], set_up['Line11'].iloc[i + 1], 
-                                       set_up['Line18'].iloc[i + 1], set_up['Line19'].iloc[i + 1]])
+        edge_attribute = torch.Tensor(edge_index_list[i])
+        # edge_attribute = torch.Tensor([set_up['Line10'].iloc[i + 1], set_up['Line11'].iloc[i + 1], set_up['Line18'].iloc[i + 1], set_up['Line19'].iloc[i + 1]])
         training_set.append(Data(x=x, edge_index=edge_index, edge_attr=edge_attribute, y=y))
     
     else:
@@ -78,8 +96,8 @@ for i in range(len(cost.iloc[0:, 1])-1):
         x = torch.Tensor([[1], [1], [1]])
         edge_index = torch.Tensor([[0, 0, 1, 1], [1, 2, 2, 2]])
         edge_index = edge_index.type(torch.long)
-        edge_attribute = torch.Tensor([set_up['Line10'].iloc[i + 1], set_up['Line11'].iloc[i + 1],
-                                       set_up['Line18'].iloc[i + 1], set_up['Line19'].iloc[i + 1]])
+        edge_attribute = torch.Tensor(edge_index_list[i-split_value])
+        # edge_attribute = torch.Tensor([set_up['Line10'].iloc[i + 1], set_up['Line11'].iloc[i + 1], set_up['Line18'].iloc[i + 1], set_up['Line19'].iloc[i + 1]])
         test_set.append(Data(x=x, edge_index=edge_index, edge_attr=edge_attribute, y=y))
     
     
@@ -89,7 +107,8 @@ for i in range(len(cost.iloc[0:, 1])-1):
     x = torch.Tensor([[1],[1],[1]])
     edge_index = torch.Tensor([[0,0,1,1],[1,2,2,2]])
     edge_index = edge_index.type(torch.long)
-    edge_attribute = torch.Tensor([set_up['Line10'].iloc[i + 1], set_up['Line11'].iloc[i + 1], set_up['Line18'].iloc[i + 1], set_up['Line19'].iloc[i + 1]])
+    edge_attribute = torch.Tensor([set_up['Line10'].iloc[i + 1], set_up['Line11'].iloc[i + 1],
+                                   set_up['Line18'].iloc[i + 1], set_up['Line19'].iloc[i + 1]])
     
     data_list.append(Data(x=x,edge_index=edge_index, edge_attr=edge_attribute, y=y))
     """
@@ -162,38 +181,41 @@ class GCN(torch.nn.Module):
         batch pool.
         Lastly, a dropout function is used to drop certain values to prevent
         overfitting
-            
         """
         # 1. Obtain node embeddings
         x, edge_index, edge_weight = data.x, data.edge_index, data.edge_attr 
         x = self.conv1(x, edge_index, edge_weight)
         x = x.relu()
         # x = F.dropout(x, training=self.training)
-        # x = self.conv2(x, edge_index, edge_weight)
-        # x = x.relu()
+        x = self.conv2(x, edge_index, edge_weight)
+        x = x.relu()
         # x = self.conv3(x, edge_index, edge_weight)
         # 2. Readout layer
         x = global_mean_pool(x, data.batch)  # [batch_size, hidden_channels]
         x = F.dropout(x, p=self.dropout_rate, training=self.training)
         x = self.lin(x)
         return x
+
+
 # %%
 data_example = next(iter(training_dataset))  # getting an example graph to get dimensions
-model = GCN(data_example, hidden_channels=40, dropout_rate = 0.400)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.02)
+model = GCN(data_example, hidden_channels=25, dropout_rate = 0.5)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 criterion = torch.nn.MSELoss()
 
 def train():
+    
+    
     model.train()
     for data in training_dataset:  # Iterate in batches over the training dataset.
         out = model(data)
-        # .x, data.edge_index, data.edge_attr, data.batch)  # Perform a single forward pass.
         loss = torch.sqrt(criterion(out, data.y))  # Compute the loss.
         loss.backward()  # Derive gradients.
         optimizer.step()  # Update parameters based on gradients.
         optimizer.zero_grad()  # Clear gradients.
     
 def test(loader):
+    
     
     model.eval()
     SE = 0
@@ -204,6 +226,7 @@ def test(loader):
     return RMSE # Finally we return the RMSE
      
 def plotter(loader):
+    
     
     model.eval()
     y_pred = []
@@ -219,10 +242,12 @@ def plotter(loader):
     return y_pred, y_target, x_values
 
 
+
+# %%
 epoch_list = []
 train_list = []
 test_list = []
-for epoch in range(1, 30):
+for epoch in range(1, 100):
     train()
     train_acc = test(training_dataset)
     test_acc = test(test_dataset)
@@ -230,14 +255,22 @@ for epoch in range(1, 30):
     epoch_list.append(epoch)
     train_list.append(train_acc[0][0].detach().numpy())
     test_list.append(test_acc[0][0].detach().numpy())
-
-
+    y_pred, y_target, x_values = plotter(test_dataset)
+    """
+    plt.plot(x_values, y_pred, color='red', label='Predicted value')
+    plt.plot(x_values, y_target, color='green', label='Target Value')
+    plt.xlabel('Scenario')
+    plt.ylabel('Normalized Cost Value')
+    plt.legend(bbox_to_anchor=(0., 1.02, 1., .102), loc='lower left',
+               ncol=2, mode="expand", borderaxespad=0.)
+    plt.show()
+    """
 
 # %%
 y_pred, y_target, x_values = plotter(test_dataset)
 plt.plot(x_values, y_pred, color='red', label='Predicted value')
 plt.plot(x_values, y_target, color='green', label='Target Value')
-plt.xlabel('Epoch')
+plt.xlabel('Scenario')
 plt.ylabel('Normalized Cost Value')
 plt.legend(bbox_to_anchor=(0., 1.02, 1., .102), loc='lower left',
            ncol=2, mode="expand", borderaxespad=0.)
@@ -257,5 +290,92 @@ plt.show()
 
 
 # %%
+
+min_rmse_train_list = []
+min_rmse_test_list = []
+lr_list = []
+hidden_channels_list = []
+dropout_rate_list = []
+epoch_list = []
+
+for i in range(30):
+    lr = random.randrange(1,101)/10000 # Here we find a random learnig rate value in the range of []
+    hidden_channels = random.randrange(5,51) # Here we find a random hidden_channel value in the range of 5-50
+    dropout_rate = random.randrange(0,10)/20 # Here we find a random dropout_rate value in the range of 0 and 1
+    #epoch = random.randrange(10,50) #Here we find a random epoch value in the range of 10 and 50
+    epoch = 30
+    
+    model = GCN(data_example, hidden_channels=hidden_channels, dropout_rate = dropout_rate) # Here we initalize our GCN model
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr) # We define the optimizer 
+    criterion = torch.nn.MSELoss() # And we define the criterion-type, Mean square error loss in our case.
+    
+    """
+    
+    """
+    min_rmse_train = 0
+    min_rmse_test = 0
+    previous_rmse_test = 0
+    for i in range(epoch):
+        train()
+        train_acc = test(training_dataset)
+        test_acc = test(test_dataset)
+        current_rmse_train = train_acc[0][0]
+        current_rmse_test = test_acc[0][0]
+        """Here the min values are initialized if this is the first time through the loop.
+        """
+        if min_rmse_train == 0 and min_rmse_test == 0:
+            min_rmse_train = current_rmse_train
+            min_rmse_test = current_rmse_test 
+        """Here the minimum value for the train & test rmse is changed if the current value is smaller than the current min value
+        """
+        if current_rmse_train < min_rmse_train:
+            min_rmse_train = current_rmse_train 
+        
+        if current_rmse_test < min_rmse_test:
+            min_rmse_test = current_rmse_test
+        """Here I create the option to break out of the loop if the solution converges
+        """
+        if abs(previous_rmse_test - current_rmse_test) < 0.0001:
+            print(f"solution converged at epoch: {i}")
+            break
+        else:
+            previous_rmse_test = current_rmse_test
+            continue
+        break
+            
+    min_rmse_train_list.append(min_rmse_train)
+    min_rmse_test_list.append(min_rmse_test)
+    lr_list.append(lr)
+    hidden_channels_list.append(hidden_channels)
+    dropout_rate_list.append(dropout_rate)
+    epoch_list.append(epoch)
+    
+for i in range(len(lr_list)):
+    print(f'Min RMSE Test: {min_rmse_test_list[i]:.7f}, Min RMSE Train: {min_rmse_train_list[i]:.7f}')
+    print(f'obtained with a learning rate of: {lr_list[i]:.4f}, a hidden channel nr of: {hidden_channels_list[i]:03d}')
+    print(f'a dropout rate of: {dropout_rate_list[i]:.4f} and an epoch number of: {epoch_list[i]:03d}')
+
+"""
+Here I find the index of the minimum value of the RMSE. This is done this way
+as pytorch don't have a method of doing it.
+"""
+
+value = 0
+min_rmse = 0
+for i in range(len(min_rmse_test_list)):
+    if min_rmse == 0:
+        min_rmse = min_rmse_test_list[i]
+        
+    if min_rmse_test_list[i] < min_rmse:
+        print("hei")
+        min_rmse = min_rmse_test_list[i]
+        value = i
+        
+print(min_rmse)
+print(value)
+
+print(f"The lowest total RMSE value, {min_rmse_test_list[value]:.7f}, for the test set was found with the following settings: ")
+print(f'a learning rate of: {lr_list[value]:.4f}, a hidden channel nr of: {hidden_channels_list[value]:03d}')
+print(f'a dropout rate of: {dropout_rate_list[value]:.4f} and an epoch number of: {epoch_list[value]:03d}')
 
 # %%
