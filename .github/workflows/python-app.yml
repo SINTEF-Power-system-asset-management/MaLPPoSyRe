@@ -6,16 +6,17 @@ name: Python application
 on: [push]
 jobs:
   tests:
-
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9']
+    name: Python ${{ matrix.python-version }}
     steps:
     - uses: actions/checkout@v2
-    - name: Set up Python 3.9
-      uses: actions/checkout@v2
-      uses: actions/setup-python@v2
+    - uses: actions/setup-python@v1
       with:
-        python-version: 3.9
-    - run: pip insall nox
+        python-version: ${{ matrix.python-version }}
+        architecture: x64
+    - run: pip install nox
     - run: nox
 
