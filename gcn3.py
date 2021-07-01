@@ -22,7 +22,6 @@ data_list is the list containing all the datapoints. Each datapoint is a single 
 a list of datapoints and then create the datasets from those.
 """
 data_list = []
-y_list = []
 for i in range(len(cost.iloc[0:,1])-1):
     """
     Loop used to create the dataset
@@ -36,7 +35,6 @@ for i in range(len(cost.iloc[0:,1])-1):
     It also defines the features such as capacity of the edges.
     """
     y = torch.Tensor([[cost['Total expected cost'].iloc[i]]])
-    y_list.append(cost['Total expected cost'].iloc[i])
     x = torch.Tensor([[1],[1],[1]])
     edge_index = torch.Tensor([[0,0,1,1],[1,2,2,2]])
     edge_index = edge_index.type(torch.long)
@@ -318,6 +316,6 @@ print(value)
 print(f"The lowest total RMSE value, {min_rmse_test_list[value]:.7f}, for the test set was found with the following settings: ")
 print(f'a learning rate of: {lr_list[value]:.4f}, a hidden channel nr of: {hidden_channels_list[value]:03d}')
 print(f'a dropout rate of: {dropout_rate_list[value]:.4f} and an epoch number of: {epoch_list[value]:03d}')
-    
+
 
 # %%
