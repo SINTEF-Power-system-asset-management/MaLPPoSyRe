@@ -7,8 +7,8 @@ def lint(session):
                 '--max-line-length=127',
                 '--count')
 
-@nox.session(python="3.8")
+@nox.session()
 def black(session):
-        args = session.posargs or locations
-            session.install("black")
-                session.run("black", *args)
+    args = session.posargs or locations
+    session.install("black")
+    session.run("black", *args)
