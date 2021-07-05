@@ -12,8 +12,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Linear
 from torch_geometric.nn import GCNConv, global_mean_pool
-
-
+# %%
 """
 set_up: Csv file containing the line capacity between the areas for each, used as edge weights in the graph
 cost: The total cost values for each scenario defined as the deseried variable y.
@@ -39,6 +38,7 @@ for i in range(len(cost.iloc[0:, 1]) - 1):
     )
 
 temp = list(zip(y_list, edge_index_list))
+random.seed(2)
 random.shuffle(temp)
 y_list, edge_index_list = zip(*temp)
 
@@ -55,9 +55,9 @@ the PowerTransformer method from scikit learn. The training set is both fitted a
 before it is reshaped back to its original form"""
 y_train = np.array(y_train)
 y_train = y_train.reshape((len(y_train), 1))
-pt = PowerTransformer(method="box-cox", standardize=True)
+#pt = PowerTransformer(method="box-cox", standardize=True)
 #pt = QuantileTransformer(n_quantiles=200, random_state=0)
-#pt = StandardScaler()
+pt = StandardScaler()
 #pt = normalize()
 #pt = MinMaxScaler()
 y_train_transformed = pt.fit_transform(y_train)
@@ -71,7 +71,22 @@ y_test = np.array(y_test)
 y_test = y_test.reshape((len(y_test), 1))
 y_test_transformed = pt.transform(y_test)
 y_test_transformed = y_test_transformed.reshape(-1)
+# %%
+Nbins=20
 
+plt.hist(y_test_transformed, bins=Nbins, alpha=0.5, density=True)
+plt.hist(y_train_transformed, bins=Nbins, alpha=0.5, density=True)
+plt.show()
+
+set_up["Line10"].plot.hist(bins=100, alpha=0.5)
+set_up["Line11"].plot.hist(bins=100, alpha=0.5)
+set_up["Line18"].plot.hist(bins=100, alpha=0.5)
+set_up["Line19"].plot.hist(bins=100, alpha=0.5)
+
+# %%
+plt.scatter(set_up["Line19"], cost["Total expected cost"])
+
+# %%
 """
 We start by creating a dataset. This is done piecewise by creating a datapoint per scenario from set_up and cost.
 data_list is the list containing all the datapoints. Each datapoint is a single graph. The goal is to construct
@@ -142,7 +157,7 @@ training_dataset = DataLoader(training_set, batch_size=1)
 test_dataset = DataLoader(test_set, batch_size=1)
 """
 # %%
-torch.manual_seed(12345)
+#torch.manual_seed(1)
 print(f"Number of training graphs: {len(training_dataset)}")
 print(f"Number of test graphs: {len(test_dataset)}")
 # %%
@@ -261,7 +276,7 @@ def plotter(loader):
 epoch_list = []
 train_list = []
 test_list = []
-for epoch in range(1, 100):
+for epoch in range(1, 30):
     train()
     train_acc = test(training_dataset)
     test_acc = test(test_dataset)
@@ -281,6 +296,21 @@ for epoch in range(1, 100):
                ncol=2, mode="expand", borderaxespad=0.)
     plt.show()
     """
+
+# %%
+y_pred, y_target, x_values = plotter(training_dataset)
+plt.plot(x_values, y_pred, color="red", label="Predicted value")
+plt.plot(x_values, y_target, color="green", label="Target Value")
+plt.xlabel("Scenario")
+plt.ylabel("Normalized Cost Value")
+plt.legend(
+    bbox_to_anchor=(0.0, 1.02, 1.0, 0.102),
+    loc="lower left",
+    ncol=2,
+    mode="expand",
+    borderaxespad=0.0,
+)
+plt.show()
 
 # %%
 y_pred, y_target, x_values = plotter(test_dataset)
