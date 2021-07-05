@@ -6,7 +6,7 @@ from torch_geometric.data import Data, DataLoader
 import pandas as pd
 import numpy as np
 import random as random
-from sklearn.preprocessing import PowerTransformer
+from sklearn.preprocessing import PowerTransformer, QuantileTransformer, StandardScaler, normalize, MinMaxScaler
 import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
@@ -31,10 +31,10 @@ for i in range(len(cost.iloc[0:, 1]) - 1):
     y_list.append(cost["Total expected cost"].iloc[i])
     edge_index_list.append(
         [
-            set_up["Line10"].iloc[i + 1] / 100,
-            set_up["Line11"].iloc[i + 1] / 100,
-            set_up["Line18"].iloc[i + 1] / 100,
-            set_up["Line19"].iloc[i + 1] / 100,
+            set_up["Line10"].iloc[i + 1],
+            set_up["Line11"].iloc[i + 1],
+            set_up["Line18"].iloc[i + 1],
+            set_up["Line19"].iloc[i + 1],
         ]
     )
 
@@ -56,6 +56,10 @@ before it is reshaped back to its original form"""
 y_train = np.array(y_train)
 y_train = y_train.reshape((len(y_train), 1))
 pt = PowerTransformer(method="box-cox", standardize=True)
+#pt = QuantileTransformer(n_quantiles=200, random_state=0)
+#pt = StandardScaler()
+#pt = normalize()
+#pt = MinMaxScaler()
 y_train_transformed = pt.fit_transform(y_train)
 y_train_transformed = y_train_transformed.reshape(-1)
 
@@ -196,8 +200,8 @@ class GCN(torch.nn.Module):
         x = self.conv1(x, edge_index, edge_weight)
         x = x.relu()
         # x = F.dropout(x, training=self.training)
-        x = self.conv2(x, edge_index, edge_weight)
-        x = x.relu()
+        #x = self.conv2(x, edge_index, edge_weight)
+        #x = x.relu()
         # x = self.conv3(x, edge_index, edge_weight)
         # 2. Readout layer
         x = global_mean_pool(x, data.batch)  # [batch_size, hidden_channels]
@@ -210,7 +214,7 @@ class GCN(torch.nn.Module):
 data_example = next(
     iter(training_dataset)
 )  # getting an example graph to get dimensions
-model = GCN(data_example, hidden_channels=25, dropout_rate=0.5)
+model = GCN(data_example, hidden_channels=25, dropout_rate=0.25)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 criterion = torch.nn.MSELoss()
 
@@ -319,7 +323,7 @@ hidden_channels_list = []
 dropout_rate_list = []
 epoch_list = []
 
-for i in range(30):
+for i in range(100):
     lr = (
         random.randrange(1, 101) / 10000
     )  # Here we find a random learnig rate value in the range of []
@@ -330,7 +334,7 @@ for i in range(30):
         random.randrange(0, 10) / 20
     )  # Here we find a random dropout_rate value in the range of 0 and 1
     # epoch = random.randrange(10,50) #Here we find a random epoch value in the range of 10 and 50
-    epoch = 30
+    epoch = 100
 
     model = GCN(
         data_example, hidden_channels=hidden_channels, dropout_rate=dropout_rate
@@ -372,6 +376,7 @@ for i in range(30):
         else:
             previous_rmse_test = current_rmse_test
             continue
+        print(f"solution converged at epoch: {i}")
         break
 
     min_rmse_train_list.append(min_rmse_train)
