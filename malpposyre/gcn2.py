@@ -13,7 +13,7 @@ from torch.nn import Linear
 from torch_geometric.nn import GCNConv, global_mean_pool
 # +
 """set_up: Csv file containing the line capacity between the areas for each, used as edge weights in the graph
-cost: The total cost values for each scenario defined as the deseried variable y.
+cost: The total cost values for each scenario defined as the desired variable y.
 """
 set_up = pd.read_csv("prev_line_caps.csv")
 cost = pd.read_csv("tot_exp_cost.csv")
@@ -32,8 +32,8 @@ edge_index_list = []
 inter_area_flow = []
 for i in range(len(cost.iloc[0:, 1])):
     if (cost["Total expected cost"].iloc[i]) > 1.5:
-        #y_list.append(1.15)
-        y_list.append(cost["Total expected cost"].iloc[i])
+        y_list.append(1.15)
+        #y_list.append(cost["Total expected cost"].iloc[i])
     else:
         y_list.append(cost["Total expected cost"].iloc[i])
     edge_index_list.append(
@@ -41,7 +41,7 @@ for i in range(len(cost.iloc[0:, 1])):
             set_up["Line10"].iloc[i],
             set_up["Line11"].iloc[i],
             set_up["Line18"].iloc[i],
-            set_up["Line19"].iloc[i],
+            set_up["Line19"].iloc[i]
         ]
     )
     inter_area_flow.append(
@@ -84,7 +84,7 @@ The training set is both fitted and transformed before it is reshaped back to it
 It is also possible to run the script without any transformation. This is done by changing the 
 choice parameter to 1 (int) or something else.
 """
-choice = 1
+choice = 0
 if choice == 0:
     y_train = np.array(y_train)
     y_train = y_train.reshape((len(y_train), 1))
@@ -243,8 +243,8 @@ Disclaimer: Even though the MSELoss() criterion is called, in the train
 function the square-root is taken off the loss-function, making
 the MSE to the RMSE
 """
-model = GCN(data_example, hidden_channels=12, dropout_rate=0)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0051)
+model = GCN(data_example, hidden_channels=31, dropout_rate=0)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0027)
 criterion = torch.nn.MSELoss()
 scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
 
@@ -560,6 +560,9 @@ for i in range(200):
     dropout_rate_list.append(dropout_rate)
     epoch_list.append(epoch)
 
+
+
+# +
 for i in range(len(lr_list)):
     print(
         f"Min MSE Test: {min_rmse_test_list[i]:.7f}, Min MSE Train: {min_rmse_train_list[i]:.7f}"
