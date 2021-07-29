@@ -15,9 +15,11 @@ from torch_geometric.nn import GCNConv, global_mean_pool
 """set_up: Csv file containing the line capacity between the areas for each, used as edge weights in the graph
 cost: The total cost values for each scenario defined as the desired variable y.
 """
-set_up = pd.read_csv("prev_line_caps.csv")
-#set_up = pd.read_csv("opf_flow_P.csv")
+#set_up = pd.read_csv("prev_line_caps.csv")
+set_up = pd.read_csv("opf_flow_P.csv")
 cost = pd.read_csv("tot_exp_cost.csv")
+
+opf = True
 
 """ In order to both shuffle the dataset and transform it, the datapoints from the csv
 file, including the total cost, the inter-area flow and the line capacity, has to be shuffled in the same
@@ -33,7 +35,7 @@ edge_weight_list = []
 inter_area_flow = []
 for i in range(len(cost.iloc[0:, 1])):
     if (cost["Total expected cost"].iloc[i]) > 1.5:
-        #y_list.append(1.15)
+        #y_list.append(1.5)
         y_list.append(cost["Total expected cost"].iloc[i])
     else:
         y_list.append(cost["Total expected cost"].iloc[i])
@@ -45,24 +47,36 @@ for i in range(len(cost.iloc[0:, 1])):
             set_up["Line19"].iloc[i]
         ]
     )
-    inter_area_flow.append(
-        [
-            (set_up["Line10"].iloc[i]/100
-            + set_up["Line11"].iloc[i]/100
-            + set_up["Line18"].iloc[i]/100
-            + set_up["Line19"].iloc[i]/100
-            )*1400*1300*1000/10000000
-        ]
-    )
+    if opf == False:
+        inter_area_flow.append(
+            [
+                (set_up["Line10"].iloc[i]/100
+                + set_up["Line11"].iloc[i]/100
+                + set_up["Line18"].iloc[i]/100
+                + set_up["Line19"].iloc[i]/100
+                )*1400*1300*1000/10000000
+            ]
+        )
+    else:
+        inter_area_flow.append(
+            [
+                (abs(set_up["Line10"].iloc[i])
+                + abs(set_up["Line11"].iloc[i])
+                + abs(set_up["Line18"].iloc[i])
+                + abs(set_up["Line19"].iloc[i])
+                )
+            ]
+        )
 temp = list(zip(y_list, edge_weight_list, inter_area_flow))
-random.seed(2) # here a random seed is set to increase consistency between tests
+random.seed(10) # here a random seed is set to increase consistency between tests
 random.shuffle(temp)
 y_list, edge_weight_list, inter_area_flow = zip(*temp)
 
 """ After the lists have been shuffled, they are then split into a training set
 and a test test
 """
-
+y_copy = y_list
+inter_copy = inter_area_flow
 split_value = 360
 y_train = y_list[:split_value]
 y_train_copy = y_train
@@ -91,8 +105,8 @@ if choice == 0:
     y_train = y_train.reshape((len(y_train), 1))
     #pt = PowerTransformer(method="box-cox", standardize=True)
     #pt = QuantileTransformer(n_quantiles=5, random_state=0)
-    #pt = StandardScaler()
-    pt = MinMaxScaler()
+    pt = StandardScaler()
+    #pt = MinMaxScaler()
     y_train_transformed = pt.fit_transform(y_train)
     y_train_transformed = y_train_transformed.reshape(-1)
 
@@ -118,13 +132,20 @@ yes = True
 if yes == True:
     #pt = PowerTransformer(method="box-cox", standardize=True)
     #pt = QuantileTransformer(n_quantiles=5, random_state=0)
-    #pt = StandardScaler()
-    pt = MinMaxScaler()
+    pt = StandardScaler()
+    #pt = MinMaxScaler()
     
     edge_weight_list = np.array(edge_weight_list)
     edge_weight_list = edge_weight_list.reshape((len(edge_weight_list)*4,1))
     edge_weight_list = pt.fit_transform(edge_weight_list)
     edge_weight_list = edge_weight_list.reshape(450,4)
+
+# -
+
+
+plt.scatter(inter_copy, y_copy)
+#plt.xlim(500,700)
+plt.show()
 
 # +
 """We start by creating a dataset. This is done piecewise by creating 
@@ -242,6 +263,18 @@ class GCN(torch.nn.Module):
         return y
 
 
+# -
+
+y_train = np.array(y_train)
+y_train = y_train.reshape((len(y_train), 1))
+#pt = PowerTransformer(method="box-cox", standardize=True)
+#pt = QuantileTransformer(n_quantiles=5, random_state=0)
+pt = StandardScaler()
+#pt = MinMaxScaler()
+y_train_transformed = pt.fit_transform(y_train)
+y_train_transformed = y_train_transformed.reshape(-1)
+
+
 # +
 data_example = next(
     iter(training_dataset)
@@ -259,8 +292,8 @@ Disclaimer: Even though the MSELoss() criterion is called, in the train
 function the square-root is taken off the loss-function, making
 the MSE to the RMSE
 """
-model = GCN(data_example, hidden_channels=12, dropout_rate=0)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+model = GCN(data_example, hidden_channels=22, dropout_rate=0.45)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0079)
 criterion = torch.nn.MSELoss()
 scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
 
@@ -399,7 +432,7 @@ else:
         epoch_list.append(epoch)
         train_list.append(train_acc[0][0].detach().numpy())
         test_list.append(test_acc[0][0].detach().numpy())
-        if abs(previous_rmse_test - current_rmse_test) < 0.0001:
+        if abs(previous_rmse_test - current_rmse_test) < 0.000001:
             print(f"solution converged at epoch: {epoch}")
             break
         else:
@@ -444,8 +477,8 @@ plt.show()
 for the test set
 """
 y_pred, y_target, x_values = plotter(test_dataset)
-#plt.ylim(1,1.1)
-plt.ylim(-0.3,0.3)
+plt.ylim(-0.4,0.2)
+#plt.ylim(-0.01,0.1)
 plt.plot(x_values, y_pred, color="red", label="Predicted value")
 plt.plot(x_values, y_target, color="green", label="Target Value")
 plt.xlabel("Scenario")
@@ -480,8 +513,17 @@ plt.show()
 """Here the inter-area value vs cost graph is created for the 
 predicted values. 
 """
-y_pred, y_target, x_values = plotter(test_dataset)
+y_pred, y_target, x_values = plotter(test_dataset) 
+y_pred, y_target = np.array(y_pred), np.array(y_target)
+y_pred, y_target = y_pred.reshape(-1,1), y_target.reshape(-1,1)
+y_pred, y_target = pt.inverse_transform(y_pred), pt.inverse_transform(y_target)
 plt.scatter(inter_area_flow, y_pred, color="red", label="Predicted value")
+plt.scatter(inter_area_flow, y_target, color="green", label="target value")
+#plt.ylim(1.31,1.35)
+#plt.ylim(330,360)
+#plt.ylim(20,80)
+#plt.ylim(1.02,1.20)
+plt.xlim(630,640)
 plt.xlabel("Inter-area flow")
 plt.ylabel("Cost Value")
 plt.legend(
@@ -512,7 +554,7 @@ hidden_channels_list = []
 dropout_rate_list = []
 epoch_list = []
 
-for i in range(200):
+for i in range(50):
     lr = (
         random.randrange(1, 101) / 10000
     )  # Here we find a random learnig rate value
@@ -600,7 +642,6 @@ for i in range(len(min_rmse_test_list)):
         min_rmse = min_rmse_test_list[i]
 
     if min_rmse_test_list[i] < min_rmse:
-        print("hei")
         min_rmse = min_rmse_test_list[i]
         value = i
 
