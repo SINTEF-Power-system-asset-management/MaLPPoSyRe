@@ -16,6 +16,7 @@ from torch_geometric.nn import GCNConv, global_mean_pool
 cost: The total cost values for each scenario defined as the desired variable y.
 """
 set_up = pd.read_csv("prev_line_caps.csv")
+#set_up = pd.read_csv("opf_flow_P.csv")
 cost = pd.read_csv("tot_exp_cost.csv")
 
 """ In order to both shuffle the dataset and transform it, the datapoints from the csv
@@ -28,15 +29,15 @@ either of the y.append methods. The constraining value 1.15 was chosen based on 
 other values, as 1.15 is larger by a certain margin.
 """
 y_list = []
-edge_index_list = []
+edge_weight_list = []
 inter_area_flow = []
 for i in range(len(cost.iloc[0:, 1])):
     if (cost["Total expected cost"].iloc[i]) > 1.5:
-        y_list.append(1.15)
-        #y_list.append(cost["Total expected cost"].iloc[i])
+        #y_list.append(1.15)
+        y_list.append(cost["Total expected cost"].iloc[i])
     else:
         y_list.append(cost["Total expected cost"].iloc[i])
-    edge_index_list.append(
+    edge_weight_list.append(
         [
             set_up["Line10"].iloc[i],
             set_up["Line11"].iloc[i],
@@ -53,10 +54,10 @@ for i in range(len(cost.iloc[0:, 1])):
             )*1400*1300*1000/10000000
         ]
     )
-temp = list(zip(y_list, edge_index_list, inter_area_flow))
+temp = list(zip(y_list, edge_weight_list, inter_area_flow))
 random.seed(2) # here a random seed is set to increase consistency between tests
 random.shuffle(temp)
-y_list, edge_index_list, inter_area_flow = zip(*temp)
+y_list, edge_weight_list, inter_area_flow = zip(*temp)
 
 """ After the lists have been shuffled, they are then split into a training set
 and a test test
@@ -103,9 +104,28 @@ if choice == 0:
     y_test = y_test.reshape((len(y_test), 1))
     y_test_transformed = pt.transform(y_test)
     y_test_transformed = y_test_transformed.reshape(-1)
+    
 else:
     y_train_transformed = y_train_copy
     y_test_transformed = y_test_copy
+    
+    
+"""The code below gives the option to transform the edge_weight_list data if 
+the dataset "opf_flow_P.csv" is used. This is to prevent the vanishing gradient
+problem. Set to True if using the mentioned file.
+"""
+yes = True
+if yes == True:
+    #pt = PowerTransformer(method="box-cox", standardize=True)
+    #pt = QuantileTransformer(n_quantiles=5, random_state=0)
+    #pt = StandardScaler()
+    pt = MinMaxScaler()
+    
+    edge_weight_list = np.array(edge_weight_list)
+    edge_weight_list = edge_weight_list.reshape((len(edge_weight_list)*4,1))
+    edge_weight_list = pt.fit_transform(edge_weight_list)
+    edge_weight_list = edge_weight_list.reshape(450,4)
+
 # +
 """We start by creating a dataset. This is done piecewise by creating 
 a datapoint per scenario from set_up and cost. 
@@ -133,9 +153,7 @@ for i in range(len(cost.iloc[0:, 1])):
         x = torch.Tensor([[1], [1], [1]])
         edge_index = torch.Tensor([[0, 0, 1, 1], [1, 2, 2, 2]])
         edge_index = edge_index.type(torch.long)
-        edge_attribute = torch.Tensor(edge_index_list[i])
-        # edge_attribute = torch.Tensor([set_up['Line10'].iloc[i + 1], 
-        # set_up['Line11'].iloc[i + 1], set_up['Line18'].iloc[i + 1], set_up['Line19'].iloc[i + 1]])
+        edge_attribute = torch.Tensor(edge_weight_list[i])
         training_set.append(
             Data(x=x, edge_index=edge_index, edge_attr=edge_attribute, y=y)
         )
@@ -145,9 +163,7 @@ for i in range(len(cost.iloc[0:, 1])):
         x = torch.Tensor([[1], [1], [1]])
         edge_index = torch.Tensor([[0, 0, 1, 1], [1, 2, 2, 2]])
         edge_index = edge_index.type(torch.long)
-        edge_attribute = torch.Tensor(edge_index_list[i - split_value])
-        # edge_attribute = torch.Tensor([set_up['Line10'].iloc[i + 1], 
-        # set_up['Line11'].iloc[i + 1], set_up['Line18'].iloc[i + 1], set_up['Line19'].iloc[i + 1]])
+        edge_attribute = torch.Tensor(edge_weight_list[i])
         test_set.append(Data(x=x, edge_index=edge_index, edge_attr=edge_attribute, y=y))
 
 """The data_list is then split into two lists, a training set and a test set.
@@ -243,8 +259,8 @@ Disclaimer: Even though the MSELoss() criterion is called, in the train
 function the square-root is taken off the loss-function, making
 the MSE to the RMSE
 """
-model = GCN(data_example, hidden_channels=31, dropout_rate=0)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0027)
+model = GCN(data_example, hidden_channels=12, dropout_rate=0)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 criterion = torch.nn.MSELoss()
 scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
 
@@ -290,19 +306,15 @@ def test(loader):
         SE = 0
         for data in loader:  # Iterate in batches over the training/test dataset
             out = model(data)  # define the output value
-            #out = out[0][0].detach().numpy()
-            #print(out)
-            #y = data.y
-            #y = y[0][0].detach().numpy()
-            #print(y)
-            #out = out.reshape(-1,1)
-            #y = y.reshape(-1,1)
-            #out = pt.inverse_transform(out)
-            #y = pt.inverse_transform(y)
-            SE += (out - data.y) ** 2  # Sum over the SE
-        RMSE = torch.sqrt(SE / len(loader.dataset))
-        RMSE = RMSE.reshape(-1,1)
-        RMSE = pt.inverse_transform(RMSE.detach().numpy())
+            out = out.reshape(-1,1)
+            out = pt.inverse_transform(out.detach().numpy())
+            y = data.y
+            y = y.reshape(-1,1)
+            y = pt.inverse_transform(y.detach().numpy())
+            SE += (out - y) ** 2  # Sum over the SE
+        RMSE = np.sqrt(SE / len(loader.dataset))
+        #RMSE = RMSE.reshape(-1,1)
+        #RMSE = pt.inverse_transform(RMSE.detach().numpy())
         return RMSE  # Finally we return the RMSE
     else:
         model.eval()
@@ -432,6 +444,8 @@ plt.show()
 for the test set
 """
 y_pred, y_target, x_values = plotter(test_dataset)
+#plt.ylim(1,1.1)
+plt.ylim(-0.3,0.3)
 plt.plot(x_values, y_pred, color="red", label="Predicted value")
 plt.plot(x_values, y_target, color="green", label="Target Value")
 plt.xlabel("Scenario")
