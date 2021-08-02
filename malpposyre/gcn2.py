@@ -12,7 +12,15 @@ import torch.nn.functional as F
 from torch.nn import Linear
 from torch_geometric.nn import GCNConv, global_mean_pool
 # +
-"""set_up: Csv file containing the line capacity between the areas for each, used as edge weights in the graph
+"""Set_up can be defined by two possible csv files: 
+prev_line_caps.csv - containing the line capacity between the areas for each, used as edge weights in the graph
+opf_flow_P.csv - Containing the actual flow in / out from an area, also used as edge weights in the graph 
+
+To get the most realistic results, it is adviced to use the 'opf_flow_P.csv' file.
+If this file is being used, set opf = True to get the correct calculations for 
+the inter-area flow. If the file 'prev_line_caps.csv' is used, set opf = False
+for the correct inter-area flow calculation. 
+
 cost: The total cost values for each scenario defined as the desired variable y.
 """
 #set_up = pd.read_csv("prev_line_caps.csv")
@@ -28,7 +36,7 @@ order as to not mix the values up as they are connected to each other.
 Furthermore, the outlying datapoint values in the cost-value file are detected and either 
 constrained to a lower value or not. This can be changed by hashing out
 either of the y.append methods. The constraining value 1.15 was chosen based on the
-other values, as 1.15 is larger by a certain margin.
+other values in the file, as 1.15 is larger by a certain margin.
 """
 y_list = []
 edge_weight_list = []
@@ -68,7 +76,7 @@ for i in range(len(cost.iloc[0:, 1])):
             ]
         )
 temp = list(zip(y_list, edge_weight_list, inter_area_flow))
-random.seed(10) # here a random seed is set to increase consistency between tests
+random.seed(2) # here a random seed is set to increase consistency between tests
 random.shuffle(temp)
 y_list, edge_weight_list, inter_area_flow = zip(*temp)
 
@@ -126,26 +134,22 @@ else:
     
 """The code below gives the option to transform the edge_weight_list data if 
 the dataset "opf_flow_P.csv" is used. This is to prevent the vanishing gradient
-problem. Set to True if using the mentioned file.
+problem. 
 """
-yes = True
-if yes == True:
+
+if opf == True:
     #pt = PowerTransformer(method="box-cox", standardize=True)
     #pt = QuantileTransformer(n_quantiles=5, random_state=0)
-    pt = StandardScaler()
+    lt = StandardScaler()
     #pt = MinMaxScaler()
     
     edge_weight_list = np.array(edge_weight_list)
     edge_weight_list = edge_weight_list.reshape((len(edge_weight_list)*4,1))
-    edge_weight_list = pt.fit_transform(edge_weight_list)
+    edge_weight_list = lt.fit_transform(edge_weight_list)
     edge_weight_list = edge_weight_list.reshape(450,4)
 
 # -
-
-
-plt.scatter(inter_copy, y_copy)
-#plt.xlim(500,700)
-plt.show()
+print(max(y_test_transformed))
 
 # +
 """We start by creating a dataset. This is done piecewise by creating 
@@ -252,27 +256,16 @@ class GCN(torch.nn.Module):
         y = self.conv1(x, edge_index, edge_weight)
         y = y.relu()
         # y = F.dropout(y, training=self.training)
-        # y = self.conv2(y, edge_index, edge_weight)
-        # y = y.relu()
+        y = self.conv2(y, edge_index, edge_weight)
+        y = y.relu()
         # y = self.conv3(y, edge_index, edge_weight)
         # y = y.relu()
+        
         # 2. Readout layer
         y = global_mean_pool(y, data.batch)  # [batch_size, hidden_channels]
         y = F.dropout(y, p=self.dropout_rate, training=self.training)
         y = self.lin(y)
         return y
-
-
-# -
-
-y_train = np.array(y_train)
-y_train = y_train.reshape((len(y_train), 1))
-#pt = PowerTransformer(method="box-cox", standardize=True)
-#pt = QuantileTransformer(n_quantiles=5, random_state=0)
-pt = StandardScaler()
-#pt = MinMaxScaler()
-y_train_transformed = pt.fit_transform(y_train)
-y_train_transformed = y_train_transformed.reshape(-1)
 
 
 # +
@@ -292,8 +285,8 @@ Disclaimer: Even though the MSELoss() criterion is called, in the train
 function the square-root is taken off the loss-function, making
 the MSE to the RMSE
 """
-model = GCN(data_example, hidden_channels=22, dropout_rate=0.45)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0079)
+model = GCN(data_example, hidden_channels=60, dropout_rate=0.1)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0025)
 criterion = torch.nn.MSELoss()
 scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
 
@@ -308,12 +301,12 @@ def train():
     model.train()
     for data in training_dataset:  # Iterate in batches over the training dataset.
         optimizer.zero_grad()  # Clear gradients.
-        out = model(data)
+        out = model(data) # Output value of the model
         loss = torch.sqrt(criterion(out, data.y))  # Compute the loss.
         #loss = criterion(out, data.y)
         loss.backward()  # Derive gradients.
         optimizer.step()  # Update parameters based on gradients.
-    scheduler.step()
+    scheduler.step() # Reduction of learning rate
 
 
 def test(loader):
@@ -332,22 +325,21 @@ def test(loader):
     if Choice = 0, the function assume a transformation method
     was used and will try to inverse-transform the values before
     calculating the RMSE.
-    If choice =/= 0, the RMSE is calculated directly.
+    If choice =/= 0, the RMSE is calculated directly as there
+    hasn't been used a transformation method on the data.
     """ 
     if choice == 0:
         model.eval()
         SE = 0
         for data in loader:  # Iterate in batches over the training/test dataset
             out = model(data)  # define the output value
-            out = out.reshape(-1,1)
-            out = pt.inverse_transform(out.detach().numpy())
+            out = out.reshape(-1,1) # Reshape the size of the tensor
+            out = pt.inverse_transform(out.detach().numpy()) #Inverse transform the value
             y = data.y
-            y = y.reshape(-1,1)
-            y = pt.inverse_transform(y.detach().numpy())
+            y = y.reshape(-1,1) #Reshaping the size of the tensor
+            y = pt.inverse_transform(y.detach().numpy()) # Inverse transforming the value
             SE += (out - y) ** 2  # Sum over the SE
         RMSE = np.sqrt(SE / len(loader.dataset))
-        #RMSE = RMSE.reshape(-1,1)
-        #RMSE = pt.inverse_transform(RMSE.detach().numpy())
         return RMSE  # Finally we return the RMSE
     else:
         model.eval()
@@ -477,8 +469,11 @@ plt.show()
 for the test set
 """
 y_pred, y_target, x_values = plotter(test_dataset)
-plt.ylim(-0.4,0.2)
-#plt.ylim(-0.01,0.1)
+#plt.ylim(-0.25,0.1)
+#plt.ylim(-0.001,0.04)
+#plt.ylim(-0.002,0.05)
+#plt.ylim(1.02,1.12)
+#plt.ylim(1.025,1.2)
 plt.plot(x_values, y_pred, color="red", label="Predicted value")
 plt.plot(x_values, y_target, color="green", label="Target Value")
 plt.xlabel("Scenario")
@@ -513,17 +508,14 @@ plt.show()
 """Here the inter-area value vs cost graph is created for the 
 predicted values. 
 """
-y_pred, y_target, x_values = plotter(test_dataset) 
-y_pred, y_target = np.array(y_pred), np.array(y_target)
-y_pred, y_target = y_pred.reshape(-1,1), y_target.reshape(-1,1)
-y_pred, y_target = pt.inverse_transform(y_pred), pt.inverse_transform(y_target)
+if choice == 0:
+    y_pred, y_target, x_values = plotter(test_dataset) 
+    y_pred, y_target = np.array(y_pred), np.array(y_target)
+    y_pred, y_target = y_pred.reshape(-1,1), y_target.reshape(-1,1)
+    y_pred, y_target = pt.inverse_transform(y_pred), pt.inverse_transform(y_target)
 plt.scatter(inter_area_flow, y_pred, color="red", label="Predicted value")
 plt.scatter(inter_area_flow, y_target, color="green", label="target value")
-#plt.ylim(1.31,1.35)
-#plt.ylim(330,360)
-#plt.ylim(20,80)
-#plt.ylim(1.02,1.20)
-plt.xlim(630,640)
+plt.ylim(1.02,1.2)
 plt.xlabel("Inter-area flow")
 plt.ylabel("Cost Value")
 plt.legend(
