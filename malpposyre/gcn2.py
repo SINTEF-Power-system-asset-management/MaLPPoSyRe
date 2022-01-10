@@ -15,9 +15,6 @@ import torch
 import torch.nn.functional as f
 from torch.nn import Linear
 from torch_geometric.nn import GCNConv, global_mean_pool
-import os
-
-os.chdir('C:\my-proj\MaLPPoSyRe\data')
 
 # +
 """Set_up can be defined by two possible csv files: 
@@ -35,11 +32,11 @@ cost: The total cost values for each scenario defined as the desired variable y.
 opf = True
 
 if opf:
-    set_up = pd.read_csv("opf_flow_P.csv", index_col="Unnamed: 0")
+    set_up = pd.read_csv("./data/opf_flow_P.csv", index_col="Unnamed: 0")
 else:
-    set_up = pd.read_csv("prev_line_caps.csv", index_col="Unnamed: 0")
+    set_up = pd.read_csv("./data/prev_line_caps.csv", index_col="Unnamed: 0")
 
-cost = pd.read_csv("tot_exp_cost.csv", index_col="prev_id")
+cost = pd.read_csv("./data/tot_exp_cost.csv", index_col="prev_id")
 df = set_up.join(cost)
 
 """ In order to both shuffle the dataset and transform it, the datapoints from the csv
@@ -180,7 +177,7 @@ if opf:
     edge_weight_list = np.array(edge_weight_list)
     edge_weight_list = edge_weight_list.reshape((len(edge_weight_list) * 4, 1))
     edge_weight_list = lt.fit_transform(edge_weight_list)
-    edge_weight_list = edge_weight_list.reshape(450, 4)
+    edge_weight_list = edge_weight_list.reshape(df.shape[0], 4)
 
 # -
 print(max(y_test_transformed))

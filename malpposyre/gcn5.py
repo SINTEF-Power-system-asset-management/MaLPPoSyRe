@@ -6,12 +6,19 @@ from torch_geometric.data import Data, DataLoader
 import pandas as pd
 import numpy as np
 import random as random
-from sklearn.preprocessing import PowerTransformer, QuantileTransformer, StandardScaler, MinMaxScaler, OneHotEncoder
+from sklearn.preprocessing import (
+    PowerTransformer,
+    QuantileTransformer,
+    StandardScaler,
+    MinMaxScaler,
+    OneHotEncoder,
+)
 import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear
 from torch_geometric.nn import GCNConv, global_mean_pool
+
 # %%
 """set_up: Csv file containing the line capacity between the areas for each, used as edge weights in the graph
 cost: The total cost values for each scenario defined as the deseried variable y.
@@ -31,7 +38,7 @@ scenarios, exploring different corrective actions.
 Examples of this is the datapoint p1, which has gone from 
 being a single scenario up to having 10 different scenarios.
 """
-#set_up = pd.read_csv("prev_line_caps.csv")
+# set_up = pd.read_csv("prev_line_caps.csv")
 cost = pd.read_csv("costs.csv")
 set_up = pd.read_csv("opf_flow_P.csv")
 
@@ -50,97 +57,93 @@ for i in range(len(set_up.iloc[0:, 1])):
         if opf == False:
             if set_up["Unnamed: 0"].iloc[i] == cost["prev_id"].iloc[j]:
                 y_list.append(
-                        cost["Dispatch costs"].iloc[i]
-                        +cost["CENS"].iloc[i]
-                        +cost["FCR cost"].iloc[i]
-                        +cost["Redispatch cost"].iloc[i]
-                        +cost["SPS cost"].iloc[i]
+                    cost["Dispatch costs"].iloc[i]
+                    + cost["CENS"].iloc[i]
+                    + cost["FCR cost"].iloc[i]
+                    + cost["Redispatch cost"].iloc[i]
+                    + cost["SPS cost"].iloc[i]
                 )
                 edge_weight_list.append(
                     [
                         set_up["Line10"].iloc[i],
                         set_up["Line11"].iloc[i],
                         set_up["Line18"].iloc[i],
-                        set_up["Line19"].iloc[i]
+                        set_up["Line19"].iloc[i],
                     ]
                 )
                 if opf == False:
                     inter_area_flow.append(
                         [
-                            (set_up["Line10"].iloc[i]/100
-                            + set_up["Line11"].iloc[i]/100
-                            + set_up["Line18"].iloc[i]/100
-                            + set_up["Line19"].iloc[i]/100
-                            )*1400*1300*1000/10000000
+                            (
+                                set_up["Line10"].iloc[i] / 100
+                                + set_up["Line11"].iloc[i] / 100
+                                + set_up["Line18"].iloc[i] / 100
+                                + set_up["Line19"].iloc[i] / 100
+                            )
+                            * 1400
+                            * 1300
+                            * 1000
+                            / 10000000
                         ]
                     )
                 else:
                     inter_area_flow.append(
                         [
-                            (abs(set_up["Line10"].iloc[i])
-                            + abs(set_up["Line11"].iloc[i])
-                            + abs(set_up["Line18"].iloc[i])
-                            + abs(set_up["Line19"].iloc[i])
+                            (
+                                abs(set_up["Line10"].iloc[i])
+                                + abs(set_up["Line11"].iloc[i])
+                                + abs(set_up["Line18"].iloc[i])
+                                + abs(set_up["Line19"].iloc[i])
                             )
                         ]
                     )
-                fault_list.append(
-                    [
-                        cost["fault"].iloc[j]
-                    ]
-                )
-                corr_list.append(
-                    [
-                        cost["corr"].iloc[j]
-                    ]
-                )
+                fault_list.append([cost["fault"].iloc[j]])
+                corr_list.append([cost["corr"].iloc[j]])
         else:
             y_list.append(
-                        cost["Dispatch costs"].iloc[i]
-                        +cost["CENS"].iloc[i]
-                        +cost["FCR cost"].iloc[i]
-                        +cost["Redispatch cost"].iloc[i]
-                        +cost["SPS cost"].iloc[i]
-                )
+                cost["Dispatch costs"].iloc[i]
+                + cost["CENS"].iloc[i]
+                + cost["FCR cost"].iloc[i]
+                + cost["Redispatch cost"].iloc[i]
+                + cost["SPS cost"].iloc[i]
+            )
             edge_weight_list.append(
                 [
                     set_up["Line10"].iloc[i],
                     set_up["Line11"].iloc[i],
                     set_up["Line18"].iloc[i],
-                    set_up["Line19"].iloc[i]
+                    set_up["Line19"].iloc[i],
                 ]
             )
             if opf == False:
                 inter_area_flow.append(
                     [
-                        (set_up["Line10"].iloc[i]/100
-                        + set_up["Line11"].iloc[i]/100
-                        + set_up["Line18"].iloc[i]/100
-                        + set_up["Line19"].iloc[i]/100
-                        )*1400*1300*1000/10000000
+                        (
+                            set_up["Line10"].iloc[i] / 100
+                            + set_up["Line11"].iloc[i] / 100
+                            + set_up["Line18"].iloc[i] / 100
+                            + set_up["Line19"].iloc[i] / 100
+                        )
+                        * 1400
+                        * 1300
+                        * 1000
+                        / 10000000
                     ]
                 )
             else:
                 inter_area_flow.append(
                     [
-                        (abs(set_up["Line10"].iloc[i])
-                        + abs(set_up["Line11"].iloc[i])
-                        + abs(set_up["Line18"].iloc[i])
-                        + abs(set_up["Line19"].iloc[i])
+                        (
+                            abs(set_up["Line10"].iloc[i])
+                            + abs(set_up["Line11"].iloc[i])
+                            + abs(set_up["Line18"].iloc[i])
+                            + abs(set_up["Line19"].iloc[i])
                         )
                     ]
                 )
-            fault_list.append(
-                [
-                    cost["fault"].iloc[j]
-                ]
-            )
-            corr_list.append(
-                [
-                    cost["corr"].iloc[j]
-                ]
-            )
-        
+            fault_list.append([cost["fault"].iloc[j]])
+            corr_list.append([cost["corr"].iloc[j]])
+
 """Changes the edge_weights based on the fault. If there is a fault on a certain line, then
 the capacity of that line is changed to zero.
 """
@@ -153,31 +156,31 @@ for i in range(len(cost.iloc[0:, 1])):
         edge_weight_list[i][2] = 0
     elif cost["fault"].iloc[i] == "fault_L19":
         edge_weight_list[i][3] = 0
-        
+
 for i in range(len(cost.iloc[0:, 1])):
-        if cost["corr"].iloc[i] == "fault":
-            x_list.append(torch.Tensor([[1], [1], [1]]))
-        elif cost["corr"].iloc[i] == "corr_G1":
-            x_list.append(torch.Tensor([[0], [1], [1]]))
-        elif cost["corr"].iloc[i] == "corr_G5":
-            x_list.append(torch.Tensor([[1], [0], [1]]))
-        elif cost["corr"].iloc[i] == "corr_L10":
-            x_list.append(torch.Tensor([[1], [1], [0]]))
+    if cost["corr"].iloc[i] == "fault":
+        x_list.append(torch.Tensor([[1], [1], [1]]))
+    elif cost["corr"].iloc[i] == "corr_G1":
+        x_list.append(torch.Tensor([[0], [1], [1]]))
+    elif cost["corr"].iloc[i] == "corr_G5":
+        x_list.append(torch.Tensor([[1], [0], [1]]))
+    elif cost["corr"].iloc[i] == "corr_L10":
+        x_list.append(torch.Tensor([[1], [1], [0]]))
 """Below gives the option to restrict the largest cost values"""
-       
-#enc = OneHotEncoder()
-#enc.fit(corr_list)
-#corr_list = enc.transform(corr_list).toarray()
-#enc.fit(fault_list)
-#fault_list = enc.transform(fault_list).toarray()
-#x_list = list(zip(corr_list, fault_list))
+
+# enc = OneHotEncoder()
+# enc.fit(corr_list)
+# corr_list = enc.transform(corr_list).toarray()
+# enc.fit(fault_list)
+# fault_list = enc.transform(fault_list).toarray()
+# x_list = list(zip(corr_list, fault_list))
 
 """In order to both shuffle the dataset and transform it, the datapoints from the csv
 file, including the total cost, the inter-area flow and the line capacity, has to be shuffled in the same
 order as to not mix the values up as they are connected to each other.
-""" 
+"""
 temp = list(zip(y_list, edge_weight_list, x_list, inter_area_flow))
-random.seed(2) # here a random seed is set to increase consistency between tests
+random.seed(2)  # here a random seed is set to increase consistency between tests
 random.shuffle(temp)
 y_list, edge_weight_list, x_list, inter_area_flow = zip(*temp)
 
@@ -185,8 +188,8 @@ y_list, edge_weight_list, x_list, inter_area_flow = zip(*temp)
 
 """After the lists have been shuffled, they are then split into a training set
 and a test test
-"""    
-split_value = round(len(y_list)*0.8)
+"""
+split_value = round(len(y_list) * 0.8)
 y_train = y_list[:split_value]
 y_train_copy = y_train
 y_test = y_list[split_value:]
@@ -213,10 +216,10 @@ choice = 0
 if choice == 0:
     y_train = np.array(y_train)
     y_train = y_train.reshape((len(y_train), 1))
-    #pt = PowerTransformer(method="box-cox", standardize=True)
-    #pt = QuantileTransformer(n_quantiles=5, random_state=0)
+    # pt = PowerTransformer(method="box-cox", standardize=True)
+    # pt = QuantileTransformer(n_quantiles=5, random_state=0)
     pt = StandardScaler()
-    #pt = MinMaxScaler()
+    # pt = MinMaxScaler()
     y_train_transformed = pt.fit_transform(y_train)
     y_train_transformed = y_train_transformed.reshape(-1)
 
@@ -228,27 +231,27 @@ if choice == 0:
     y_test = y_test.reshape((len(y_test), 1))
     y_test_transformed = pt.transform(y_test)
     y_test_transformed = y_test_transformed.reshape(-1)
-    
+
 else:
     y_train_transformed = y_train_copy
     y_test_transformed = y_test_copy
-    
-    
+
+
 """The code below gives the option to transform the edge_weight_list data if 
 the dataset "opf_flow_P.csv" is used. This is to prevent the vanishing gradient
 problem. 
 """
 
 if opf == True:
-    #pt = PowerTransformer(method="box-cox", standardize=True)
-    #pt = QuantileTransformer(n_quantiles=5, random_state=0)
+    # pt = PowerTransformer(method="box-cox", standardize=True)
+    # pt = QuantileTransformer(n_quantiles=5, random_state=0)
     lt = StandardScaler()
-    #pt = MinMaxScaler()
-    
+    # pt = MinMaxScaler()
+
     edge_weight_list = np.array(edge_weight_list)
-    edge_weight_list = edge_weight_list.reshape((len(edge_weight_list),1))
+    edge_weight_list = edge_weight_list.reshape((len(edge_weight_list), 1))
     edge_weight_list = lt.fit_transform(edge_weight_list)
-    edge_weight_list = edge_weight_list.reshape(len(y_list),4)
+    edge_weight_list = edge_weight_list.reshape(len(y_list), 4)
 
 
 # %%
@@ -279,7 +282,7 @@ for i in range(len(cost.iloc[0:, 1])):
         edge_index = torch.Tensor([[0, 0, 1, 1], [1, 2, 2, 2]])
         edge_index = edge_index.type(torch.long)
         edge_attribute = torch.Tensor(edge_index_list[i])
-        
+
         training_set.append(
             Data(x=x, edge_index=edge_index, edge_attr=edge_attribute, y=y)
         )
@@ -291,9 +294,7 @@ for i in range(len(cost.iloc[0:, 1])):
         edge_index = edge_index.type(torch.long)
         edge_attribute = torch.Tensor(edge_index_list[i])
 
-        test_set.append(
-            Data(x=x, edge_index=edge_index, edge_attr=edge_attribute, y=y)
-        )
+        test_set.append(Data(x=x, edge_index=edge_index, edge_attr=edge_attribute, y=y))
 
 """The data_list is then split into two lists, a training set and a test set.
 The splitting weight is done by a 80/20 ratio of training/test
@@ -302,7 +303,7 @@ The splitting weight is done by a 80/20 ratio of training/test
 training_dataset = DataLoader(training_set, batch_size=1)
 test_dataset = DataLoader(test_set, batch_size=1)
 # %%
-#torch.manual_seed(1)
+# torch.manual_seed(1)
 print(f"Number of training graphs: {len(training_dataset)}")
 print(f"Number of test graphs: {len(test_dataset)}")
 # %%
@@ -395,7 +396,7 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
 
 def train():
     """Training function which trains the model.
-    The function iterates over the training set, estimates the y-value and 
+    The function iterates over the training set, estimates the y-value and
     compares it with the actual value. The RMSE and the gradients are then
     calculated and are fed back to the optimization function which
     updates the weights of the neural network.
@@ -405,37 +406,41 @@ def train():
         optimizer.zero_grad()  # Clear gradients.
         out = model(data)
         loss = torch.sqrt(criterion(out, data.y))  # Compute the loss.
-        #loss = criterion(out, data.y)
+        # loss = criterion(out, data.y)
         loss.backward()  # Derive gradients.
         optimizer.step()  # Update parameters based on gradients.
-    scheduler.step() # Reduction of learning rate
+    scheduler.step()  # Reduction of learning rate
 
 
 def test(loader):
     """Test function which evaluates the model by
     calculating the Root Mean Square Error
-    
+
     Args:
     Loader - Dataset input, either training or test
-    
+
     Creates:
-    
-    Root Mean Square Error between the: 
+
+    Root Mean Square Error between the:
     out - output value from the model
     data.y - actual value
-    
-    """ 
-    
+
+    """
+
     if choice == 0:
         model.eval()
         SE = 0
         for data in loader:  # Iterate in batches over the training/test dataset
             out = model(data)  # define the output value
-            out = out.reshape(-1,1) # Reshape the size of the tensor
-            out = pt.inverse_transform(out.detach().numpy()) #Inverse transform the value
+            out = out.reshape(-1, 1)  # Reshape the size of the tensor
+            out = pt.inverse_transform(
+                out.detach().numpy()
+            )  # Inverse transform the value
             y = data.y
-            y = y.reshape(-1,1) #Reshaping the size of the tensor
-            y = pt.inverse_transform(y.detach().numpy()) # Inverse transforming the value
+            y = y.reshape(-1, 1)  # Reshaping the size of the tensor
+            y = pt.inverse_transform(
+                y.detach().numpy()
+            )  # Inverse transforming the value
             SE += (out - y) ** 2  # Sum over the SE
         RMSE = np.sqrt(SE / len(loader.dataset))
         return RMSE  # Finally we return the RMSE
@@ -454,11 +459,11 @@ def plotter(loader):
     the target value and the x value which can be used for plotting
     after the model has been trained.
     Args:
-    
+
     Loader - Dataset input, either training or test
-    
+
     Creates:
-    
+
     y_target - target value
     y_pred - predicted value from the model
     x_values - Scenario value. (p1, p11, p111 etc)
@@ -617,9 +622,7 @@ dropout_rate_list = []
 epoch_list = []
 
 for i in range(50):
-    lr = (
-        random.randrange(1, 101) / 10000
-    )  # Here we find a random learnig rate value
+    lr = random.randrange(1, 101) / 10000  # Here we find a random learnig rate value
     hidden_channels = random.randrange(
         5, 31
     )  # Here we find a random hidden_channel value in the range of 5-50
@@ -665,9 +668,9 @@ for i in range(50):
             break
         else:
             previous_rmse_test = current_rmse_test
-            
-            if i==99:
-                 print(f"solution finally converged at epoch: {i}")
+
+            if i == 99:
+                print(f"solution finally converged at epoch: {i}")
             continue
         break
 
