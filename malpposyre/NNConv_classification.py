@@ -1,47 +1,117 @@
-import torch
-from torch_geometric.data import DataLoader
-import pandas as pd
-import matplotlib.pyplot as plt
-import torch.nn.functional as F
-from torch.nn import Linear, Sequential, Sigmoid
-from torch_geometric.nn import global_mean_pool, NNConv
-from sklearn.model_selection import train_test_split
-import numpy as np
 import div_methods as div
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+import torch
+from torch.nn import Linear, Sequential, Sigmoid
+import torch.nn.functional as F
+from torch_geometric.data import DataLoader
+from torch_geometric.nn import global_mean_pool, NNConv
+import random as random
 
-df = pd.read_csv('data/tot_cost_failure_scenarios_041021_multicorr2.csv')
+# +
+"""
+Classifying costs linked to failure scenarios, preventive and corrective strategies.
+data.
 
+Import file with scenarios as a dataframe.
+
+prev_id: id of preventive strategy
+Line10, Line11, Line18, Line19: Power flow in respetive lines
+Area1 prod, Area2 prod, Area3 prod: total production in respective areas
+Area1 load, Area2 load, Area3 load: total load in respective areas
+inter_area_flow: inter-area flow
+fault: which line has fault in given scenario
+corr: which area has corrective measure (load or production disconnected)
+Total cost: Total cost of system operation for given scenario
+
+Rest of columns are One hot encodings. Unsure if we need to differentiate between disconnected 
+load and production since we only have 3 possible corrective measures. ??
+"""
+
+df = pd.read_csv("data/tot_cost_failure_scenarios_041021_multicorr2.csv")
+
+# +
 """
 Scenarios with total cost less than thresh set to 0. Scenarios with total cost
 more than thresh set to 1.
 """
 
 thresh = 1.126
-df["Total cost"][df["Total cost"] < thresh] = 0
-df["Total cost"][df["Total cost"] >= thresh] = 1
-    
-df["fault_Line10"] = df["fault"].apply(lambda row: 1 if row=="fault_L10" else 0)
-df["fault_Line11"] = df["fault"].apply(lambda row: 1 if row=="fault_L11" else 0)
-df["fault_Line18"] = df["fault"].apply(lambda row: 1 if row=="fault_L18" else 0)
-df["fault_Line19"] = df["fault"].apply(lambda row: 1 if row=="fault_L19" else 0)
+df["Class"] = df.apply(lambda row: 0.0 if row["Total cost"] < thresh else 1.0, axis=1)
 
+
+# Adding edge features
+df["fault_Line10"] = df["fault"].apply(lambda row: 1 if row == "fault_L10" else 0)
+df["fault_Line11"] = df["fault"].apply(lambda row: 1 if row == "fault_L11" else 0)
+df["fault_Line18"] = df["fault"].apply(lambda row: 1 if row == "fault_L18" else 0)
+df["fault_Line19"] = df["fault"].apply(lambda row: 1 if row == "fault_L19" else 0)
+
+# +
 """
-train_test_split splits data into train and test while also shuffling. test_size=0.2 puts 
-20% of data in test dataframe random_state chooses seed for shuffling which gives more 
-consistency for our process.
+train_test_split splits data into train and test while also shuffling. test_size=0.2 puts 20% of data i test dataframe
+random_state chooses seed for shuffling which gives more consistency for our process.
+
+When access to more data, should split into train, validation and test-set. ??
+
+Splitting into train and test set while keeping all scenarios with the same prev_id in the same set.
+Maybe not necessary in classification model.
 """
 
-df_train, df_test = train_test_split(df, test_size=0.2, random_state=1)
+prev_ids = df.prev_id.unique()
 
-edge_features_train = abs(df_train[["Line10", "fault_Line10", "Line11", "fault_Line11", "Line18",
-                                "fault_Line18", "Line19", "fault_Line19"]].values)
-edge_features_test = abs(df_test[["Line10", "fault_Line10", "Line11", "fault_Line11", "Line18",
-                                "fault_Line18", "Line19", "fault_Line19"]].values)
+grouped = df.groupby(df.prev_id)
 
-y_train = df_train["Total cost"].values
-y_test = df_test["Total cost"].values
+df_list = []
+for prev_id in prev_ids:
+    df_list.append(grouped.get_group(prev_id))
 
 
+train_df_list, test_df_list = train_test_split(df_list, test_size=0.2, random_state=1)
+
+df_train = pd.concat(train_df_list)
+df_test = pd.concat(test_df_list)
+
+
+# +
+"""
+Create ege features.
+"""
+
+edge_features_train = abs(
+    df_train[
+        [
+            "Line10",
+            "fault_Line10",
+            "Line11",
+            "fault_Line11",
+            "Line18",
+            "fault_Line18",
+            "Line19",
+            "fault_Line19",
+        ]
+    ].values
+)
+edge_features_test = abs(
+    df_test[
+        [
+            "Line10",
+            "fault_Line10",
+            "Line11",
+            "fault_Line11",
+            "Line18",
+            "fault_Line18",
+            "Line19",
+            "fault_Line19",
+        ]
+    ].values
+)
+
+y_train = df_train["Class"].values
+y_test = df_test["Class"].values
+
+# +
 """ 
 Here, the user can choose which transformer to use by changing the name of variable 
 transform_method. The transformation methods are:
@@ -55,19 +125,25 @@ MinMaxScaler (Normalization)
 transform_method = "MinMaxScaler"
 
 scale_node = div.transform_data_method(transform_method)
-train_node_scaled = scale_node.fit_transform(df_train[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]])
-test_node_scaled = scale_node.transform(df_test[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]])
+train_node_scaled = scale_node.fit_transform(
+    df_train[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]]
+)
+test_node_scaled = scale_node.transform(
+    df_test[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]]
+)
 
 scale_edge = div.transform_data_method(transform_method)
 edge_features_train = edge_features_train.reshape((len(edge_features_train) * 8, 1))
 edge_features_train = scale_edge.fit_transform(edge_features_train)
-edge_features_train = edge_features_train.reshape(int(len(edge_features_train) / 8), 4, 2)
+edge_features_train = edge_features_train.reshape(
+    int(len(edge_features_train) / 8), 4, 2
+)
 
 edge_features_test = edge_features_test.reshape((len(edge_features_test) * 8, 1))
 edge_features_test = scale_edge.transform(edge_features_test)
 edge_features_test = edge_features_test.reshape(int(len(edge_features_test) / 8), 4, 2)
 
-
+# +
 """
 Creating node attributes.
 """
@@ -112,32 +188,27 @@ node_attr_test = df_test[
 ].values
 node_attr_test = node_attr_test.reshape(int(len(node_attr_test)), 3, 3)
 
-
+# +
 """
 We start by creating a dataset. This is done piecewise by creating 
 a datapoint per scenario. Each datapoint is a single graph.
 The goal is to construct a list of datapoints and then create the datasets from those.
-
-Map functions loop through all datapoints.
 """
 
-training_set = list(map(div.create_dataset, y_train, edge_features_train, node_attr_train))
+# Map function loops through all datapoints.
+training_set = list(
+    map(div.create_dataset, y_train, edge_features_train, node_attr_train)
+)
 test_set = list(map(div.create_dataset, y_test, edge_features_test, node_attr_test))
 
-
-"""
-Can change batch size. At the moment batch_size != 1 not working.
-"""
-
-batch_size = 1
-training_dataset = DataLoader(training_set, batch_size=batch_size)
-test_dataset = DataLoader(test_set, batch_size=batch_size)
+training_dataset = DataLoader(training_set, batch_size=1)
+test_dataset = DataLoader(test_set, batch_size=1)
 
 print(f"Number of training graphs: {len(training_dataset)}")
 print(f"Number of test graphs: {len(test_dataset)}")
 
 
-
+# +
 """
 Here we create the Graph Convolutional Network Machine Learning Model.
 
@@ -147,7 +218,9 @@ the edge function. Will later move this class to div_methods.py
 
 
 class GCN(torch.nn.Module):
-    def __init__(self, data_example, hidden_channels=8, dropout_rate=0, isthird_layer=False):
+    def __init__(
+        self, data_example, hidden_channels=8, dropout_rate=0, isthird_layer=False
+    ):
         super(GCN, self).__init__()
         """Function used to initialize the convolution and linear layers.
 
@@ -169,20 +242,24 @@ class GCN(torch.nn.Module):
         Finally, the output in the linear layer is a single neuron which returns the desired 
         target value y.
         """
-        
+
         self.conv1 = NNConv(
-            data_example.num_node_features, hidden_channels, self.edge_func, "mean")
+            data_example.num_node_features, hidden_channels, self.edge_func, "mean"
+        )
         self.conv2 = NNConv(hidden_channels, hidden_channels, self.edge_func, "mean")
         self.conv3 = NNConv(hidden_channels, hidden_channels, self.edge_func, "mean")
         self.lin = Linear(hidden_channels, 1)
         self.dropout_rate = dropout_rate
         self.hidden_channels = hidden_channels
         self.isthird_layer = isthird_layer
-    
+
     def edge_func(self, edge_feat):
         # lin = Linear(data_example.num_edge_features, data_example.num_node_features*self.hidden_channels)
-        lin = Sequential(Linear(data_example.num_edge_features, 4), 
-                            Sigmoid(), Linear(4, data_example.num_node_features*self.hidden_channels))
+        lin = Sequential(
+            Linear(data_example.num_edge_features, 4),
+            Sigmoid(),
+            Linear(4, data_example.num_node_features * self.hidden_channels),
+        )
         return lin(edge_feat)
 
     def forward(self, data):
@@ -201,7 +278,7 @@ class GCN(torch.nn.Module):
         """
         # 1. Obtain node embeddings
         x, edge_index, edge_features = data.x, data.edge_index, data.edge_attr
-        
+
         y = self.conv1(x, edge_index, edge_features)
         y = y.relu()
         # y = F.dropout(y, training=self.training)
@@ -221,93 +298,91 @@ class GCN(torch.nn.Module):
 
 
 # +
-data_example = next(
-    iter(training_dataset)
-)  # getting an example graph to get dimensions
-
-"""Here the model, optimizer function, loss-criterion and the
+"""
+Here the model, optimizer function, loss-criterion and the
 learning-rate scheduler is initalized. 
 
 model : Initalizes the neuron network
 optimizer : Initializes the backpropagation optimizer
-criterion : Defines the error function
 scheduler : Initalizes the learning-rate reducter function
-
-Disclaimer: Even though the MSELoss() criterion is called, in the train
-function the square-root is taken off the loss-function, making
-the MSE to the RMSE
+criterion : Defines the error function
+is_third_layer: Boolean. If set to True, model will use 3 GCN layers. 
+                Else, model will use 2 GCN-layers.
 """
 
-model = GCN(data_example, hidden_channels=12, dropout_rate=0.2)
-optimizer = torch.optim.SGD(model.parameters(), lr=0.035)
+is_third_layer = False
+
+# Hyperparameters: Set based on hyperparameteroptimisation.
+hidden_channels = 12
+dropout_rate = 0.2
+learning_rate = 0.0005
+
+# Getting an example graph to get dimensions
+data_example = next(iter(training_dataset))
+
+model = GCN(
+    data_example,
+    hidden_channels=hidden_channels,
+    dropout_rate=dropout_rate,
+    isthird_layer=is_third_layer,
+)
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 scheduler = torch.optim.lr_scheduler.ExponentialLR(
     optimizer, gamma=0.95
 )  # Factor for learning rate decay
 
-criterion = torch.nn.BCEWithLogitsLoss()
+# Weight based on the ratio between the majority and the minority class
+pos_weight = 3
+criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
 
-"""Below is a loop which trains the model over a set amount of epochs and 
+# +
+"""
+Below is a loop which trains the model over a set amount of epochs and 
 which prints the current epoch and the accuracy for the training-set and the test-set.
 The accuracy and the epoch values are stored in separate arrays.
 
 num_epochs : Number of epochs in training
 """
 num_epochs = 50
+patience_value = 0.0001
+patience_num = 5
+
 train_list = np.array([])
 test_list = np.array([])
-previous_accuracy_test = 0
-for epoch in range(1, num_epochs+1):
+acc_diff = np.array([])
+previous_acc_test = 0
+for epoch in range(1, num_epochs + 1):
     div.train_model(model, training_dataset, optimizer, scheduler, criterion)
-    train_acc = div.test_model(model, training_dataset, batch_size=batch_size, classification=True)
-    test_acc = div.test_model(model, test_dataset, batch_size=batch_size, classification=True)
-    current_acc_test = test_acc
-    print(
-        f"Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}"
+    train_acc = div.test_model(
+        model, training_dataset, batch_size=batch_size, classification=True
     )
+    test_acc = div.test_model(
+        model, test_dataset, batch_size=batch_size, classification=True
+    )
+    current_acc_test = test_acc
+    print(f"Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}")
     train_list = np.concatenate((train_list, train_acc), axis=None)
     test_list = np.concatenate((test_list, test_acc), axis=None)
-    previous_accuracy_test = current_acc_test
+    acc_diff = np.concatenate(
+        (acc_diff, abs(previous_acc_test - current_acc_test)), axis=None
+    )
+    if acc_diff[-patience_num + 1 :].mean() < patience_value:
+        print(f"solution converged at epoch: {epoch}")
+        break
+    else:
+        previous_acc_test = current_acc_test
 
 
+# +
 """
-Plot showing the difference between the target value and the predicted value
-for the test set, target data in ascending order
-"""
-y_pred, y_target, x_values = div.plotter(model, test_dataset)
-
-plot_df = pd.DataFrame(data={"pred": y_pred, "target": y_target})
-plot_df.sort_values(by="target", inplace=True)
-
-plt.scatter(x_values, plot_df["pred"], color="red", label="Predicted value", s=1)
-plt.plot(x_values, plot_df["target"], color="green", label="Target Value")
-
-plt.xlabel("Scenario")
-plt.ylabel("Cost Value")
-plt.legend(
-    bbox_to_anchor=(0.0, 1.02, 1.0, 0.102),
-    loc="lower left",
-    ncol=2,
-    mode="expand",
-    borderaxespad=0.0,
-)
-plt.show()
-
-
-"""
-Plot showing the change of error for both the training set and the test set.
+df_results return results for test data
 """
 
-epoch_list = np.arange(1, len(train_list)+1)
-plt.plot(epoch_list, train_list, color="blue", label="Training set")
-plt.plot(epoch_list, test_list, color="red", label="Test set")
-plt.xlabel("Epoch")
-plt.ylabel("Accuracy")
-plt.legend(
-    bbox_to_anchor=(0.0, 1.02, 1.0, 0.102),
-    loc="lower left",
-    ncol=2,
-    mode="expand",
-    borderaxespad=0.0,
-)
-plt.show()
+y_pred, y_prob, y_target, x_values = div.plotter(model, test_dataset)
+
+df_results = df_test.copy()
+df_results["target"] = y_target[0]
+df_results["pred"] = y_pred[0]
+df_results["prob"] = y_prob[0]
+# -

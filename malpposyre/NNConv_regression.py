@@ -1,16 +1,17 @@
-import torch
-from torch_geometric.data import DataLoader
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import torch.nn.functional as F
-from torch.nn import Linear, Sequential, Sigmoid
-from torch_geometric.nn import global_mean_pool, NNConv
-from sklearn.model_selection import train_test_split
 import div_methods as div
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+import torch
+from torch.nn import Linear, Sequential, Sigmoid
+import torch.nn.functional as F
+from torch_geometric.data import DataLoader
+from torch_geometric.nn import global_mean_pool, NNConv
 import random as random
 
-df = pd.read_csv('data/tot_cost_failure_scenarios_041021_multicorr2.csv')
+
+df = pd.read_csv("data/tot_cost_failure_scenarios_041021_multicorr2.csv")
 
 
 """
@@ -22,14 +23,14 @@ set_max_cost = True
 
 if set_max_cost:
     max_cost = 2
-    #df = df[df["Total cost"] < max_cost]
+    # df = df[df["Total cost"] < max_cost]
     df.loc[df["Total cost"] > max_cost, "Total cost"] = max_cost
 
-    
-df["fault_Line10"] = df["fault"].apply(lambda row: 1 if row=="fault_L10" else 0)
-df["fault_Line11"] = df["fault"].apply(lambda row: 1 if row=="fault_L11" else 0)
-df["fault_Line18"] = df["fault"].apply(lambda row: 1 if row=="fault_L18" else 0)
-df["fault_Line19"] = df["fault"].apply(lambda row: 1 if row=="fault_L19" else 0)
+
+df["fault_Line10"] = df["fault"].apply(lambda row: 1 if row == "fault_L10" else 0)
+df["fault_Line11"] = df["fault"].apply(lambda row: 1 if row == "fault_L11" else 0)
+df["fault_Line18"] = df["fault"].apply(lambda row: 1 if row == "fault_L18" else 0)
+df["fault_Line19"] = df["fault"].apply(lambda row: 1 if row == "fault_L19" else 0)
 
 
 """
@@ -40,10 +41,34 @@ consistency for our process.
 
 df_train, df_test = train_test_split(df, test_size=0.2, random_state=1)
 
-edge_features_train = abs(df_train[["Line10", "fault_Line10", "Line11", "fault_Line11", "Line18",
-                                "fault_Line18", "Line19", "fault_Line19"]].values)
-edge_features_test = abs(df_test[["Line10", "fault_Line10", "Line11", "fault_Line11", "Line18",
-                                "fault_Line18", "Line19", "fault_Line19"]].values)
+edge_features_train = abs(
+    df_train[
+        [
+            "Line10",
+            "fault_Line10",
+            "Line11",
+            "fault_Line11",
+            "Line18",
+            "fault_Line18",
+            "Line19",
+            "fault_Line19",
+        ]
+    ].values
+)
+edge_features_test = abs(
+    df_test[
+        [
+            "Line10",
+            "fault_Line10",
+            "Line11",
+            "fault_Line11",
+            "Line18",
+            "fault_Line18",
+            "Line19",
+            "fault_Line19",
+        ]
+    ].values
+)
 
 y_train = df_train["Total cost"].values
 y_test = df_test["Total cost"].values
@@ -64,7 +89,7 @@ transform_method = "MinMaxScaler"
 Scaling cost, node and edge features separately as a quick fix.
 """
 
-scale_y = div.transform_data_method(transform_method) 
+scale_y = div.transform_data_method(transform_method)
 y_train = y_train.reshape((len(y_train), 1))
 y_train = scale_y.fit_transform(y_train)
 y_train = y_train.reshape(-1)
@@ -73,14 +98,20 @@ y_test = y_test.reshape((len(y_test), 1))
 y_test = scale_y.transform(y_test)
 y_test = y_test.reshape(-1)
 
-scale_node = div.transform_data_method(transform_method) 
-train_node_scaled = scale_node.fit_transform(df_train[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]])
-test_node_scaled = scale_node.transform(df_test[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]])
+scale_node = div.transform_data_method(transform_method)
+train_node_scaled = scale_node.fit_transform(
+    df_train[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]]
+)
+test_node_scaled = scale_node.transform(
+    df_test[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]]
+)
 
-scale_edge = div.transform_data_method(transform_method) 
+scale_edge = div.transform_data_method(transform_method)
 edge_features_train = edge_features_train.reshape((len(edge_features_train) * 8, 1))
 edge_features_train = scale_edge.fit_transform(edge_features_train)
-edge_features_train = edge_features_train.reshape(int(len(edge_features_train) / 8), 4, 2)
+edge_features_train = edge_features_train.reshape(
+    int(len(edge_features_train) / 8), 4, 2
+)
 
 edge_features_test = edge_features_test.reshape((len(edge_features_test) * 8, 1))
 edge_features_test = scale_edge.transform(edge_features_test)
@@ -132,7 +163,6 @@ node_attr_test = df_test[
 node_attr_test = node_attr_test.reshape(int(len(node_attr_test)), 3, 3)
 
 
-
 """
 We start by creating a dataset. This is done piecewise by creating 
 a datapoint per scenario. Each datapoint is a single graph.
@@ -141,7 +171,9 @@ The goal is to construct a list of datapoints and then create the datasets from 
 Map functions loop through all datapoints.
 """
 
-training_set = list(map(div.create_dataset, y_train, edge_features_train, node_attr_train))
+training_set = list(
+    map(div.create_dataset, y_train, edge_features_train, node_attr_train)
+)
 test_set = list(map(div.create_dataset, y_test, edge_features_test, node_attr_test))
 
 
@@ -167,7 +199,9 @@ the edge function. Will later move this class to div_methods.py
 
 
 class GCN(torch.nn.Module):
-    def __init__(self, data_example, hidden_channels=8, dropout_rate=0, isthird_layer=False):
+    def __init__(
+        self, data_example, hidden_channels=8, dropout_rate=0, isthird_layer=False
+    ):
         super(GCN, self).__init__()
         """Function used to initialize the convolution and linear layers.
 
@@ -188,20 +222,27 @@ class GCN(torch.nn.Module):
         Finally, the output in the linear layer is a single neuron which returns the desired 
         target value y.
         """
-        
+
         self.conv1 = NNConv(
-            data_example.num_node_features, hidden_channels, self.edge_func, "mean")
+            data_example.num_node_features, hidden_channels, self.edge_func, "mean"
+        )
         self.conv2 = NNConv(hidden_channels, hidden_channels, self.edge_func, "mean")
         self.conv3 = NNConv(hidden_channels, hidden_channels, self.edge_func, "mean")
         self.lin = Linear(hidden_channels, 1)
         self.dropout_rate = dropout_rate
         self.hidden_channels = hidden_channels
         self.isthird_layer = isthird_layer
-    
+
     def edge_func(self, edge_feat):
-        #lin = Linear(data_example.num_edge_features, data_example.num_node_features*self.hidden_channels)
-        lin = Sequential(Linear(data_example.num_edge_features, self.hidden_channels), 
-                            Sigmoid(), Linear(self.hidden_channels, data_example.num_node_features*self.hidden_channels))
+        # lin = Linear(data_example.num_edge_features, data_example.num_node_features*self.hidden_channels)
+        lin = Sequential(
+            Linear(data_example.num_edge_features, self.hidden_channels),
+            Sigmoid(),
+            Linear(
+                self.hidden_channels,
+                data_example.num_node_features * self.hidden_channels,
+            ),
+        )
         return lin(edge_feat)
 
     def forward(self, data):
@@ -220,7 +261,7 @@ class GCN(torch.nn.Module):
         """
         # 1. Obtain node embeddings
         x, edge_index, edge_features = data.x, data.edge_index, data.edge_attr
-        
+
         y = self.conv1(x, edge_index, edge_features)
         y = y.relu()
         # y = F.dropout(y, training=self.training)
@@ -242,7 +283,6 @@ class GCN(torch.nn.Module):
 data_example = next(
     iter(training_dataset)
 )  # getting an example graph to get dimensions
-
 
 
 """
@@ -284,14 +324,18 @@ num_epochs = 100
 train_list = np.array([])
 test_list = np.array([])
 previous_loss_test = 0
-for epoch in range(1, num_epochs+1):
-    div.train_model(model, training_dataset, optimizer, scheduler, criterion, calc_rmse=is_rmse)
-    train_acc = div.test_model(model, training_dataset, batch_size=batch_size, scale=scale_y, calc_rmse=is_rmse)
-    test_acc = div.test_model(model, test_dataset, batch_size=batch_size, scale=scale_y, calc_rmse=is_rmse)
-    current_loss_test = test_acc
-    print(
-        f"Epoch: {epoch:03d}, Train Acc: {train_acc:.7f}, Test Acc: {test_acc:.7f}"
+for epoch in range(1, num_epochs + 1):
+    div.train_model(
+        model, training_dataset, optimizer, scheduler, criterion, calc_rmse=is_rmse
     )
+    train_acc = div.test_model(
+        model, training_dataset, batch_size=batch_size, scale=scale_y, calc_rmse=is_rmse
+    )
+    test_acc = div.test_model(
+        model, test_dataset, batch_size=batch_size, scale=scale_y, calc_rmse=is_rmse
+    )
+    current_loss_test = test_acc
+    print(f"Epoch: {epoch:03d}, Train Acc: {train_acc:.7f}, Test Acc: {test_acc:.7f}")
     train_list = np.concatenate((train_list, train_acc), axis=None)
     test_list = np.concatenate((test_list, test_acc), axis=None)
     if abs(previous_loss_test - current_loss_test) < 0.00001:
@@ -299,7 +343,6 @@ for epoch in range(1, num_epochs+1):
         break
     else:
         previous_loss_test = current_loss_test
-
 
 
 """
@@ -331,7 +374,7 @@ plt.show()
 Plot showing the change of error for both the training set and the test set.
 """
 
-epoch_list = np.arange(1, len(train_list)+1)
+epoch_list = np.arange(1, len(train_list) + 1)
 plt.plot(epoch_list, train_list, color="blue", label="Training set")
 plt.plot(epoch_list, test_list, color="red", label="Test set")
 plt.xlabel("Epoch")

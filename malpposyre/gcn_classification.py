@@ -1,39 +1,88 @@
-import torch
-from torch_geometric.data import DataLoader
-import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
 import div_methods as div
 import numpy as np
+import pandas as pd
+import random as random
+from sklearn.model_selection import train_test_split
+import torch
+from torch_geometric.data import DataLoader
 
+# +
 """
-Estimating costs linked to failure scenarios, preventive and corrective strategies.
+Classifying costs linked to failure scenarios, preventive and corrective strategies.
 data.
+
+Import file with scenarios as a dataframe.
+
+prev_id: id of preventive strategy
+Line10, Line11, Line18, Line19: Power flow in respetive lines
+Area1 prod, Area2 prod, Area3 prod: total production in respective areas
+Area1 load, Area2 load, Area3 load: total load in respective areas
+inter_area_flow: inter-area flow
+fault: which line has fault in given scenario
+corr: which area has corrective measure (load or production disconnected)
+Total cost: Total cost of system operation for given scenario
+
+Rest of columns are One hot encodings. Unsure if we need to differentiate between disconnected 
+load and production since we only have 3 possible corrective measures. ??
 """
 
-df = pd.read_csv(r'data\tot_cost_failure_scenarios_041021_multicorr2.csv')
+df = pd.read_csv(r"data\tot_cost_failure_scenarios_041021_multicorr2.csv")
 
-thresh = 1.5
-df["Total cost"][df["Total cost"] < thresh] = 0
-df["Total cost"][df["Total cost"] >= thresh] = 1
-
+# +
 """
-train_test_split splits data into train and test while also shufling. test_size=0.2 puts 20% of data i test dataframe
-random_state choses seed for shuffling which gives more consistency for our process.
+Classify  scenario as high or low cost based on threshold.
 """
 
-train_df, test_df = train_test_split(df, test_size=0.2, random_state=1)
+thresh = 1.13
 
+df["Class"] = df.apply(lambda row: 0.0 if row["Total cost"] < thresh else 1.0, axis=1)
+
+# +
 """
-Important to have absolute value of power flow.
+train_test_split splits data into train and test while also shuffling. test_size=0.2 puts 20% of data i test dataframe
+random_state chooses seed for shuffling which gives more consistency for our process.
+
+When access to more data, should split into train, validation and test-set. ??
+
+Splitting into train and test set while keeping all scenarios with the same prev_id in the same set.
+Maybe not necessary in classification model.
+"""
+
+prev_ids = df.prev_id.unique()
+
+grouped = df.groupby(df.prev_id)
+
+df_list = []
+for prev_id in prev_ids:
+    df_list.append(grouped.get_group(prev_id))
+
+
+train_df_list, test_val_df_list = train_test_split(
+    df_list, test_size=0.3, random_state=1
+)
+val_df_list, test_df_list = train_test_split(
+    test_val_df_list, test_size=1 / 3, random_state=1
+)
+
+train_df = pd.concat(train_df_list)
+val_df = pd.concat(val_df_list)
+test_df = pd.concat(test_df_list)
+
+# +
+"""
+Absolute value of power flow as edge weights, since were using undirected graphs.
 """
 
 edge_weights_train = abs(train_df[["Line10", "Line11", "Line18", "Line19"]].values)
+edge_weights_val = abs(val_df[["Line10", "Line11", "Line18", "Line19"]].values)
 edge_weights_test = abs(test_df[["Line10", "Line11", "Line18", "Line19"]].values)
 
-y_train = train_df["Total cost"].values
-y_test = test_df["Total cost"].values
+y_train = train_df["Class"].values
+y_val = val_df["Class"].values
+y_test = test_df["Class"].values
 
+
+# +
 """ 
 Here, the user can choose which transformer to use by changing the name of variable transform_method. 
 The transformation methods are:
@@ -42,226 +91,314 @@ PowerTransformer
 QuantileTransformer
 StandardScaler
 MinMaxScaling (Normalization)
-
-The training set is both fitted and transformed before it is reshaped back to its original form
-
-It is also possible to run the script without any transformation. This is done by changing the 
-transform_data parameter to False.
 """
 
 transform_method = "MinMaxScaler"
 
-"""
-Scaling cost, inter area flow and edge weights individually as a quick fix. 
-"""
-
 scale_y = div.transform_data_method(transform_method)
-y_train = y_train.reshape((len(y_train), 1))
-y_train = scale_y.fit_transform(y_train)
-y_train = y_train.reshape(-1)
-
-y_test = y_test.reshape((len(y_test), 1))
-y_test = scale_y.transform(y_test)
-y_test = y_test.reshape(-1)
-
 scale_node = div.transform_data_method(transform_method)
-train_node_scaled = scale_node.fit_transform(train_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]])
-test_node_scaled = scale_node.transform(test_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]])
-
 scale_edge = div.transform_data_method(transform_method)
-edge_weights_train = edge_weights_train.reshape((len(edge_weights_train) * 4, 1))
-edge_weights_train = scale_edge.fit_transform(edge_weights_train)
-edge_weights_train = edge_weights_train.reshape(int(len(edge_weights_train) / 4), 4)
-
-edge_weights_test = edge_weights_test.reshape((len(edge_weights_test) * 4, 1))
-edge_weights_test = scale_edge.transform(edge_weights_test)
-edge_weights_test = edge_weights_test.reshape(int(len(edge_weights_test) / 4), 4)
 
 
-"""
-Creating node attributes.
-"""
+def create_input_data(
+    y_dataset, edge_weights_dataset, dataset_df, is_training_set=False, batch_size=1
+):
+    """
+    Created a function to avoid triple code.
+    """
 
-train_df["inter_area_flow_scaled"] = train_node_scaled[: ,0]
-train_df["Area1_prod_scaled"] = train_node_scaled[: ,1]
-train_df["Area2_prod_scaled"] = train_node_scaled[: ,2]
-train_df["Area3_prod_scaled"] = train_node_scaled[: ,3]
+    y_dataset = y_dataset.reshape((len(y_dataset), 1))
+    edge_weights_dataset = edge_weights_dataset.reshape(
+        (len(edge_weights_dataset) * 4, 1)
+    )
 
-test_df["inter_area_flow_scaled"] = test_node_scaled[: ,0]
-test_df["Area1_prod_scaled"] = test_node_scaled[: ,1]
-test_df["Area2_prod_scaled"] = test_node_scaled[: ,2]
-test_df["Area3_prod_scaled"] = test_node_scaled[: ,3]
+    if is_training_set:
+        y_dataset = scale_y.fit_transform(y_dataset)
+        node_scaled_dataset = scale_node.fit_transform(
+            dataset_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]]
+        )
+        edge_weights_dataset = scale_edge.fit_transform(edge_weights_dataset)
+    else:
+        y_dataset = scale_y.transform(y_dataset)
+        node_scaled_dataset = scale_node.transform(
+            dataset_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]]
+        )
+        edge_weights_dataset = scale_edge.transform(edge_weights_dataset)
 
+    y_dataset = y_dataset.reshape(-1)
+    edge_weights_dataset = edge_weights_dataset.reshape(
+        int(len(edge_weights_dataset) / 4), 4
+    )
 
-node_attr_train = train_df[
-    [
-        "Area1-corr",
-        "Area1-fault",
-        "Area1-fault2",
-        "Area1_prod_scaled",
-        "inter_area_flow_scaled",
-        "Area2-corr",
-        "Area2-fault",
-        "Area2-fault2",
-        "Area2_prod_scaled",
-        "inter_area_flow_scaled",
-        "Area3-corr",
-        "Area3-fault",
-        "Area3-fault2",
-        "Area3_prod_scaled",
-        "inter_area_flow_scaled",
-    ]
-].values
-node_attr_train = node_attr_train.reshape(int(len(node_attr_train)), 3, 5)
+    """
+    Creating node attributes.
+    """
 
-node_attr_test = test_df[
-    [
-        "Area1-corr",
-        "Area1-fault",
-        "Area1-fault2",
-        "Area1_prod_scaled",
-        "inter_area_flow_scaled",
-        "Area2-corr",
-        "Area2-fault",
-        "Area2-fault2",
-        "Area2_prod_scaled",
-        "inter_area_flow_scaled",
-        "Area3-corr",
-        "Area3-fault",
-        "Area3-fault2",
-        "Area3_prod_scaled",
-        "inter_area_flow_scaled",
-    ]
-].values
-node_attr_test = node_attr_test.reshape(int(len(node_attr_test)), 3, 5)
+    dataset_df.loc[:, "inter_area_flow_scaled"] = node_scaled_dataset[:, 0]
+    dataset_df.loc[:, "Area1_prod_scaled"] = node_scaled_dataset[:, 1]
+    dataset_df.loc[:, "Area2_prod_scaled"] = node_scaled_dataset[:, 2]
+    dataset_df.loc[:, "Area3_prod_scaled"] = node_scaled_dataset[:, 3]
 
+    node_attr_dataset = dataset_df[
+        [
+            "Area1-corr",
+            "Area1-fault",
+            "Area1-fault2",
+            "Area1_prod_scaled",
+            "inter_area_flow_scaled",
+            "Area2-corr",
+            "Area2-fault",
+            "Area2-fault2",
+            "Area2_prod_scaled",
+            "inter_area_flow_scaled",
+            "Area3-corr",
+            "Area3-fault",
+            "Area3-fault2",
+            "Area3_prod_scaled",
+            "inter_area_flow_scaled",
+        ]
+    ].values
+    node_attr_dataset = node_attr_dataset.reshape(int(len(node_attr_dataset)), 3, 5)
 
-# +
-"""We start by creating a dataset. This is done piecewise by creating 
-a datapoint per scenario. Each datapoint is a single graph.
-The goal is to construct a list of datapoints and then create the datasets from those."""
+    """
+    We start by creating a dataset. This is done piecewise by creating 
+    a datapoint per scenario. Each datapoint is a single graph.
+    The goal is to construct a list of datapoints and then create the datasets from those.
+    """
 
+    # Map function loops through all datapoints.
+    graph_dataset = list(
+        map(div.create_dataset, y_dataset, edge_weights_dataset, node_attr_dataset)
+    )
 
-"""
-Map functions loop through all datapoints.
-"""
-
-training_set = list(map(div.create_dataset, y_train, edge_weights_train, node_attr_train))
-test_set = list(map(div.create_dataset, y_test, edge_weights_test, node_attr_test))
+    return DataLoader(graph_dataset, batch_size=batch_size)
 
 
 """
-Set batch_size
+Possible to set batch size. So far, batch_size=1 given best results.
 """
 
-batch_size = 512
-training_dataset = DataLoader(training_set, batch_size=batch_size)
-test_dataset = DataLoader(test_set, batch_size=batch_size)
+batch_size = 1
 
+training_dataset = create_input_data(
+    y_train, edge_weights_train, train_df, is_training_set=True, batch_size=batch_size
+)
+val_dataset = create_input_data(
+    y_val, edge_weights_val, val_df, is_training_set=False, batch_size=batch_size
+)
+test_dataset = create_input_data(
+    y_test, edge_weights_test, test_df, is_training_set=False, batch_size=batch_size
+)
 
 print(f"Number of training graphs: {len(training_dataset)}")
+print(f"Number of validation graphs: {len(val_dataset)}")
 print(f"Number of test graphs: {len(test_dataset)}")
 
 
 # +
-data_example = next(
-    iter(training_dataset)
-)  # getting an example graph to get dimensions
-
 """
 Here the model, optimizer function, loss-criterion and the
 learning-rate scheduler is initalized. 
 
 model : Initalizes the neuron network
 optimizer : Initializes the backpropagation optimizer
+scheduler : Initalizes the learning-rate reducter function
+criterion : Defines the error function
+is_third_layer: Boolean. If set to True, model will use 3 GCN layers. 
+                Else, model will use 2 GCN-layers.
 """
 
-model = div.GCN(data_example, hidden_channels=12, dropout_rate=0.2, isthird_layer=False, is_classification=True)
-optimizer = torch.optim.SGD(model.parameters(), lr=0.001)#75)
+is_third_layer = True
 
+# Hyperparameters: Set based on hyperparameteroptimisation.
+hidden_channels = 12
+dropout_rate = 0.2
+learning_rate = 0.0005
+
+# Getting an example graph to get dimensions
+data_example = next(
+    iter(training_dataset)
+)  # getting an example graph to get dimensions
+
+model = div.GCN(
+    data_example,
+    hidden_channels=hidden_channels,
+    dropout_rate=dropout_rate,
+    isthird_layer=is_third_layer,
+    is_classification=True,
+)
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 scheduler = torch.optim.lr_scheduler.ExponentialLR(
     optimizer, gamma=0.95
 )  # Factor for learning rate decay
 
-criterion = torch.nn.BCEWithLogitsLoss()
+# Weight based on the ratio between the majority and the minority class
+pos_weight = 3
+criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
 
-
-"""Below is a loop which trains the model over a set amount of epochs and 
-which prints the current epoch and the RMSE values for the training-set and the test-set.
-The RMSE values and the epoch values are stored in seperate lists.
+# +
+"""
+Below is a loop which trains the model over a set amount of epochs and 
+which prints the current epoch and the accuracy for the training-set and the test-set.
+In addition, a breakpoint (patience_value) has been defined so that if the mean accuracy is less than a 
+desired value for n number of epochs (patience_num), the training stops to prevent overfitting.
 
 num_epochs : Number of epochs in training
 """
-num_epochs = 100
+num_epochs = 30
+
+patience_value = 0.00001
+patience_num = 10
+
 train_list = np.array([])
-test_list = np.array([])
-for epoch in range(1, num_epochs+1):
+val_list = np.array([])
+acc_diff = np.array([])
+previous_acc_val = 0
+
+for epoch in range(1, num_epochs + 1):
     div.train_model(model, training_dataset, optimizer, scheduler, criterion)
-    train_acc = div.test_model(model, training_dataset, batch_size=batch_size, classification=True)
-    test_acc = div.test_model(model, test_dataset, batch_size=batch_size, classification=True)
-    current_acc_test = test_acc
+    train_acc = div.test_model(
+        model, training_dataset, batch_size=batch_size, classification=True
+    )
+    val_acc = div.test_model(
+        model, val_dataset, batch_size=batch_size, classification=True
+    )
+    current_acc_val = val_acc
     print(
-        f"Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}"
+        f"Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Validation Acc: {val_acc:.4f}"
     )
     train_list = np.concatenate((train_list, train_acc), axis=None)
-    test_list = np.concatenate((test_list, test_acc), axis=None)
+    val_list = np.concatenate((val_list, val_acc), axis=None)
+    acc_diff = np.concatenate(
+        (acc_diff, abs(previous_acc_val - current_acc_val)), axis=None
+    )
+    if acc_diff[-patience_num + 1 :].mean() < patience_value:
+        print(f"solution converged at epoch: {epoch}")
+        break
+    else:
+        previous_acc_val = current_acc_val
 
 
-
+# +
 """
-Plot showing the difference between the target value and the predicted value
-for the test set, target data in ascending order
+df_results return results for test data
 """
-y_pred, y_target, x_values = div.plotter(model, test_dataset, is_classification=True)
 
-plot_df = pd.DataFrame(data={"pred": y_pred, "target": y_target})
-plot_df.sort_values(by="target", inplace=True)
-
-plt.scatter(x_values, plot_df["pred"], color="red", label="Predicted value", s=1)
-plt.plot(x_values, plot_df["target"], color="green", label="Target Value")
-
-plt.xlabel("Scenario")
-plt.ylabel("Cost Value")
-plt.legend(
-    bbox_to_anchor=(0.0, 1.02, 1.0, 0.102),
-    loc="lower left",
-    ncol=2,
-    mode="expand",
-    borderaxespad=0.0,
+test_acc = div.test_model(
+    model, test_dataset, batch_size=batch_size, classification=True
 )
-plt.show()
-
-
-"""
-Plot showing the change of accuracy for both the training set and 
-the test set.
-"""
-
-epoch_list = np.arange(1, len(train_list)+1)
-plt.plot(epoch_list, train_list, color="blue", label="Training set")
-plt.plot(epoch_list, test_list, color="red", label="Test set")
-plt.xlabel("Epoch")
-plt.ylabel("Accuracy")
-plt.legend(
-    bbox_to_anchor=(0.0, 1.02, 1.0, 0.102),
-    loc="lower left",
-    ncol=2,
-    mode="expand",
-    borderaxespad=0.0,
+y_pred, y_prob, y_target, x_values = div.plotter(
+    model, test_dataset, is_classification=True
 )
-plt.show()
+
+df_results = test_df.copy()
+df_results["target"] = y_target
+df_results["pred"] = y_pred
+df_results["prob"] = y_prob
 
 
-# Calculate True and False Negatives and Positives
+# +
+"""Following is the hyperparameter-optimization loop done following the random search method.
 
-plot_df["TP"] = plot_df.apply(lambda row: row['target'] == row['pred'] == 0, axis=1)
-plot_df["FN"] = plot_df.apply(lambda row: row['target'] == 0 != row['pred'], axis=1)
+The loop creates 200 models, each with a random learning rate, hidden channels number
+and dropout rate number taken from a predefined range. 
+The loop then starts to train the model over 100 epochs, or 
+until the model has converged and the change in RMSE is lower than a set threshold.
 
-plot_df["TN"] = plot_df.apply(lambda row: row['target'] == row['pred'] == 1, axis=1)
-plot_df["FP"] = plot_df.apply(lambda row: row['target'] == 1 != row['pred'], axis=1)
+The RMSE value and all the other hyperparameters are stored in each their separate list,
+and when the loop has been iterated over, a second loop goes over the RMSE list and finds the
+hyperparameter-settings with the lowest RMSE values.
+"""
+max_acc_train_list = np.array([])
+max_acc_val_list = np.array([])
+lr_list = np.array([])
+hidden_channels_list = np.array([])
+dropout_rate_list = np.array([])
+epoch_list = np.array([])
 
-from sklearn.metrics import confusion_matrix
+for i in range(50):
+    lr = random.randrange(1, 101) / 100000  # [0.001, 0.00001]
+    hidden_channels = random.randint(5, 51)
+    dropout_rate = random.randrange(0, 10) / 20  # [0, 0.5]
+    # is_third_layer = bool(random.getrandbits(1))
+    num_epochs = 50
 
-tn, fp, fn, tp = confusion_matrix(plot_df['target'], plot_df['pred']).ravel()
-(tn, fp, fn, tp)
+    model = div.GCN(
+        data_example,
+        hidden_channels=hidden_channels,
+        dropout_rate=dropout_rate,
+        isthird_layer=is_third_layer,
+    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
+
+    previous_acc_val = 0
+    for epoch in range(1, num_epochs + 1):
+        div.train_model(model, training_dataset, optimizer, scheduler, criterion)
+        train_acc = div.test_model(
+            model, training_dataset, batch_size=batch_size, classification=True
+        )
+        val_acc = div.test_model(
+            model, val_dataset, batch_size=batch_size, classification=True
+        )
+        current_acc_train = train_acc
+        current_acc_val = val_acc
+        """Here the min values are initialized if this is the first time through the loop.
+        """
+        if epoch == 1:
+            max_acc_train = current_acc_train
+            max_acc_val = current_acc_val
+        """Here the minimum value for the train & val rmse is changed if the current value is smaller than the current min value
+        """
+        if current_acc_train > max_acc_train:
+            max_acc_train = current_acc_train
+
+        if current_acc_val > max_acc_val:
+            max_acc_val = current_acc_val
+        """Here I create the option to break out of the loop if the solution converges
+        """
+        acc_diff = np.concatenate(
+            (acc_diff, abs(previous_acc_val - current_acc_val)), axis=None
+        )
+        if acc_diff[-patience_num + 1 :].mean() < patience_value:
+            print(f"solution converged at epoch: {epoch}")
+            break
+        else:
+            previous_acc_val = current_acc_val
+
+    max_acc_train_list = np.concatenate((max_acc_train_list, max_acc_train), axis=None)
+    max_acc_val_list = np.concatenate((max_acc_val_list, max_acc_val), axis=None)
+    lr_list = np.append(lr_list, lr)
+    hidden_channels_list = np.append(hidden_channels_list, hidden_channels)
+    dropout_rate_list = np.append(dropout_rate_list, dropout_rate)
+    epoch_list = np.append(epoch_list, epoch)
+
+
+# +
+"""
+Here I find the index of the max accuracy. This is done this way
+as pytorch doesn't have a method of doing it.
+"""
+
+value = 0
+for i in range(len(max_acc_val_list)):
+    if i == 0:
+        max_acc = max_acc_val_list[i]
+
+    if max_acc_val_list[i] > max_acc:
+        max_acc = max_acc_val_list[i]
+        value = i
+
+print(max_acc)
+print(value)
+
+print(
+    f"The lowest total MSE value, {max_acc_val_list[value]:.7f}, for the vallidation set was found with the following settings: "
+)
+print(
+    f"a learning rate of: {lr_list[value]:.4f}, a hidden channel nr of: {hidden_channels_list[value]}"
+)
+print(
+    f"a dropout rate of: {dropout_rate_list[value]:.4f} and an epoch number of: {epoch_list[value]}"
+)

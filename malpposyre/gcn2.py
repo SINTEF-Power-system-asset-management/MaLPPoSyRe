@@ -675,4 +675,3 @@ print(
 print(
     f"a dropout rate of: {dropout_rate_list[value]:.4f} and an epoch number of: {epoch_list[value]}"
 )
-# -

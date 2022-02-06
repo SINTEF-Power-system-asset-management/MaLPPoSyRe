@@ -13,7 +13,15 @@ from sklearn.preprocessing import (
 
 
 class GCN(torch.nn.Module):
-    def __init__(self, data_example, hidden_channels=8, dropout_rate=0, isthird_layer=False, is_classification=False):
+    def __init__(
+        self,
+        data_example,
+        hidden_channels=8,
+        dropout_rate=0,
+        output_dim=1,
+        isthird_layer=False,
+        is_classification=False,
+    ):
         super(GCN, self).__init__()
         """
         Here we create the Graph Convolutional Network Machine Learning Model. The model is initalized by inheriting 
@@ -43,7 +51,7 @@ class GCN(torch.nn.Module):
         self.conv1 = GCNConv(data_example.num_node_features, hidden_channels)
         self.conv2 = GCNConv(hidden_channels, hidden_channels)
         self.conv3 = GCNConv(hidden_channels, hidden_channels)
-        self.lin = Linear(hidden_channels, 1)
+        self.lin = Linear(hidden_channels, output_dim)
         self.dropout_rate = dropout_rate
         self.third_layer = isthird_layer
         self.is_classification = is_classification
@@ -136,18 +144,23 @@ def plotter(model, loader, is_classification=False):
     model.eval()
     y_pred = np.array([])
     y_target = np.array([])
+    y_pred_prob = np.array([])
     for data in loader:
         out = model(data)
+        pred = out
         if is_classification:
-            out = torch.Tensor([1 if x > 0.5 else 0 for x in out])
+            pred = np.round(out.detach())
         y_target = np.concatenate((y_target, data.y.reshape(-1)), axis=None)
-        y_pred = np.concatenate((y_pred, out.detach().numpy()), axis=None)
+        y_pred = np.concatenate((y_pred, pred.detach().numpy()), axis=None)
+        y_pred_prob = np.concatenate((y_pred_prob, out.detach().numpy()), axis=None)
 
     scenarios = np.arange(1, len(y_pred) + 1)
-    return y_pred, y_target, scenarios
+    return y_pred, y_pred_prob, y_target, scenarios
 
 
-def train_model(model, training_dataset, optimizer, scheduler, criterion, calc_rmse=False):
+def train_model(
+    model, training_dataset, optimizer, scheduler, criterion, calc_rmse=False
+):
     """Training function which trains the model.
     The function iterates over the training set, estimates the y-value and
     compares it with the actual value. The accuracy and the gradients are then
@@ -166,7 +179,16 @@ def train_model(model, training_dataset, optimizer, scheduler, criterion, calc_r
     scheduler.step()  # Reduction of learning rate
 
 
-def test_model(model, loader, batch_size=1, scale=None, transform_data=True, calc_rmse=False, classification=False):
+def test_model(
+    model,
+    loader,
+    batch_size=1,
+    output_dim=1,
+    scale=None,
+    transform_data=True,
+    calc_rmse=False,
+    classification=False,
+):
     """Test function which evaluates the model by
     calculating the MSE og RMSE
 
@@ -190,9 +212,10 @@ def test_model(model, loader, batch_size=1, scale=None, transform_data=True, cal
         TP = 0
         for data in loader:  # Iterate in batches over the training/test dataset
             out = model(data)  # define the output value
-            #out = out.reshape(-1, 1)  # Reshape the size of the tensor
-            pred = torch.Tensor([1 if x > 0.5 else 0 for x in out])
-            pred = pred.reshape(-1, 1)
+            # out = out.reshape(-1, 1)  # Reshape the size of the tensor
+            # pred = torch.Tensor([1 if x > 0.5 else 0 for x in out])
+            pred = np.round(out.detach())  # cut-off at 0.5
+            pred = pred.reshape(-1, output_dim)
             y = data.y
             y = y.reshape(-1, 1)  # Reshaping the size of the tensor
             TP += int((pred == y).sum())  # Check against ground-truth labels.
@@ -204,7 +227,7 @@ def test_model(model, loader, batch_size=1, scale=None, transform_data=True, cal
         SE = 0
         for data in loader:  # Iterate in batches over the training/test dataset
             out = model(data)  # define the output value
-            out = out.reshape(-1, 1)  # Reshape the size of the tensor
+            out = out.reshape(-1, output_dim)  # Reshape the size of the tensor
             out = scale.inverse_transform(
                 out.detach().numpy()
             )  # Inverse transform the value
