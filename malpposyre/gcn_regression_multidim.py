@@ -13,7 +13,7 @@ Estimating costs linked to failure scenarios, preventive and corrective strategi
 Import file with scenarios as a dataframe.
 
 prev_id: id of preventive strategy
-Line10, Line11, Line18, Line19: Power flow in respetive lines
+Line10, Line11, Line18, Line19: Power flow in respective lines
 Area1 prod, Area2 prod, Area3 prod: total production in respective areas
 Area1 load, Area2 load, Area3 load: total load in respective areas
 inter_area_flow: inter-area flow
@@ -21,11 +21,14 @@ fault: which line has fault in given scenario
 corr: which area has corrective measure (load or production disconnected)
 Total cost: Total cost of system operation for given scenario
 
-Rest of columns are One hot encodings. Unsure if we need to differentiate between disconnected 
-load and production since we only have 3 possible corrective measures. ??
+Rest of columns are one-hot-encodings.
 """
 
-df = pd.read_csv(r'data\tot_cost_failure_scenarios_041021_multicorr2.csv')
+"""
+If running script from Notebook, do not define df here.
+"""
+
+# df = pd.read_csv(r'data\tot_cost_failure_scenarios_041021_multicorr2.csv')
 # df = pd.read_csv(r'./data/tot_cost_failure_scenarios_180122_01.csv')
 
 # +
@@ -35,7 +38,7 @@ Or values higher than set_max can be set to set_max
 """
 
 set_max_cost = True
-max_cost = 1.128
+max_cost = 10  # 1.128
 
 if set_max_cost:
     df = df[df["Total cost"] < max_cost]
@@ -46,8 +49,6 @@ if set_max_cost:
 """
 train_test_split splits data into train and test while also shuffling. Train 70%, validation 20%, test 10%
 random_state chooses seed for shuffling which gives more consistency for our process.
-
-When access to more data, should split into train, validation and test-set. ??
 
 Splitting into train and test set while keeping all scenarios with the same prev_id in the same set
 """
@@ -74,7 +75,7 @@ test_df = pd.concat(test_df_list)
 
 # +
 """
-Absolute value of power flow as edge weights, since were using undirected graphs.
+Using absolute value for power flow, since were using MinMax-normalisation.
 """
 
 edge_weights_train = abs(train_df[["Line10", "Line11", "Line18", "Line19"]].values)
@@ -82,7 +83,7 @@ edge_weights_val = abs(val_df[["Line10", "Line11", "Line18", "Line19"]].values)
 edge_weights_test = abs(test_df[["Line10", "Line11", "Line18", "Line19"]].values)
 
 
-cost_types = ["Dispatch costs", "Total cost"]
+cost_types = ["Dispatch costs", "Correction cost"]
 
 y_train = train_df[cost_types].values
 y_val = val_df[cost_types].values
@@ -100,7 +101,7 @@ MinMaxScaling (Normalization)
 
 The training set is both fitted and transformed before it is reshaped back to its original form
 
-Should maybe scale power flows in lines, load and production together since they're the same unit ??
+Should maybe scale power flows in lines, load and production together since they're the same unit?
 """
 
 transform_method = "MinMaxScaler"
@@ -114,10 +115,10 @@ def create_input_data(
     y_dataset, edge_weights_dataset, dataset_df, is_training_set=False, batch_size=1
 ):
     """
-    Created a function to avoid triple code.
+    Created a function to avoid triple code. Can be moved to div_methods.py
     """
 
-    y_dataset = y_dataset.reshape((len(y_dataset)*2, 1))
+    y_dataset = y_dataset.reshape((len(y_dataset) * 2, 1))
     node_attr_dataset = abs(
         dataset_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]].values
     )
@@ -128,19 +129,15 @@ def create_input_data(
 
     if is_training_set:
         y_dataset = scale_y.fit_transform(y_dataset)
-        node_scaled_dataset = scale_node.fit_transform(
-            dataset_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]]
-        )
+        node_attr_dataset = scale_node.fit_transform(node_attr_dataset)
         edge_weights_dataset = scale_edge.fit_transform(edge_weights_dataset)
     else:
         y_dataset = scale_y.transform(y_dataset)
-        node_scaled_dataset = scale_node.transform(
-            dataset_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]]
-        )
+        node_attr_dataset = scale_node.transform(node_attr_dataset)
         edge_weights_dataset = scale_edge.transform(edge_weights_dataset)
 
-    y_dataset = y_dataset.reshape(int(len(y_dataset)/2), 2)
-    node_scaled_dataset = node_attr_dataset.reshape(int(len(node_attr_dataset) / 4), 4)
+    y_dataset = y_dataset.reshape(int(len(y_dataset) / 2), 2)
+    node_attr_dataset = node_attr_dataset.reshape(int(len(node_attr_dataset) / 4), 4)
     edge_weights_dataset = edge_weights_dataset.reshape(
         int(len(edge_weights_dataset) / 4), 4
     )
@@ -149,12 +146,12 @@ def create_input_data(
     Creating node attributes.
     """
 
-    dataset_df.loc[:, "inter_area_flow_scaled"] = node_scaled_dataset[:, 0]
-    dataset_df.loc[:, "Area1_prod_scaled"] = node_scaled_dataset[:, 1]
-    dataset_df.loc[:, "Area2_prod_scaled"] = node_scaled_dataset[:, 2]
-    dataset_df.loc[:, "Area3_prod_scaled"] = node_scaled_dataset[:, 3]
+    dataset_df.loc[:, "inter_area_flow_scaled"] = node_attr_dataset[:, 0]
+    dataset_df.loc[:, "Area1_prod_scaled"] = node_attr_dataset[:, 1]
+    dataset_df.loc[:, "Area2_prod_scaled"] = node_attr_dataset[:, 2]
+    dataset_df.loc[:, "Area3_prod_scaled"] = node_attr_dataset[:, 3]
 
-    node_attr_dataset = dataset_df[
+    node_scaled_dataset = dataset_df[
         [
             "Area1-corr",
             "Area1-fault",
@@ -173,11 +170,13 @@ def create_input_data(
             "inter_area_flow_scaled",
         ]
     ].values
-    node_attr_dataset = node_attr_dataset.reshape(int(len(node_attr_dataset)), 3, 5)
+    node_scaled_dataset = node_scaled_dataset.reshape(
+        int(len(node_scaled_dataset)), 3, 5
+    )
 
     # Map function loops through all datapoints.
     graph_dataset = list(
-        map(div.create_dataset, y_dataset, edge_weights_dataset, node_attr_dataset)
+        map(div.create_dataset, y_dataset, edge_weights_dataset, node_scaled_dataset)
     )
 
     return DataLoader(graph_dataset, batch_size=batch_size)
@@ -187,9 +186,9 @@ def create_input_data(
 """
 We start by creating a dataset. This is done piecewise by creating 
 a datapoint per scenario. Each datapoint is a single graph.
-The goal is to construct a list of datapoints and then create the datasets from those.
+The goal is to construct a list of data points and then create the datasets from those.
 
-Possible to set batch size. So far, batch_size=1 given best results.
+Possible to set batch size. So far, batch_size=1 has given best results.
 """
 
 batch_size = 1
@@ -212,7 +211,7 @@ print(f"Number of test graphs: {len(test_dataset)}")
 # +
 """
 Here the model, optimizer function, loss-criterion and the
-learning-rate scheduler is initalized. 
+learning-rate scheduler are initalized. 
 
 model : Initalizes the neuron network
 optimizer : Initializes the backpropagation optimizer
@@ -251,7 +250,7 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(
 
 criterion = torch.nn.MSELoss()
 
-# ?? test
+# Double check if these are different from the methods in div_methods.py to avoid double code
 
 
 def train_model():
@@ -341,7 +340,7 @@ def plotter(loader):
 """
 Below is a loop which trains the model over a set amount of epochs and 
 which prints the current epoch and the RMSE/MSE values for the training-set and the test-set.
-The MSE/RMSE values and the epoch values are stored in seperate lists.
+The MSE/RMSE values and the epoch values are stored in separate lists.
 In addition, a breakpoint (patience_value) has been defined so that if the mean MSE/RMSE is less than a 
 desired value for n number of epochs (patience_num), the training stops to prevent overfitting.
 
@@ -389,17 +388,17 @@ y_pred2 = scale_y.inverse_transform(np.array(y_pred).reshape(-1, 2))
 y_target2 = scale_y.inverse_transform(np.array(y_target).reshape(-1, 2))
 
 df_results = test_df.copy()
-df_results[["target1", "target2"]] = y_target2
-df_results[["pred1", "pred2"]] = y_pred2
+df_results[["Dispatch_cost_target", "Correction_cost_target"]] = y_target2
+df_results[["Dispatch_cost_pred", "Correction_cost_pred"]] = y_pred2
 # -
 
 '''
 # +
 """Following is the hyperparameter-optimization loop done following the random search method.
 
-The loop creates 200 models, each with a random learning rate, hidden channels number
+The loop creates 50 models, each with a random learning rate, hidden channels number
 and dropout rate number taken from a predefined range. 
-The loop then starts to train the model over 100 epochs, or 
+The loop then starts to train the model over set number of epochs, or 
 until the model has converged and the change in RMSE is lower than a set threshold.
 
 The RMSE value and all the other hyperparameters are stored in each their separate list,

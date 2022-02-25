@@ -14,7 +14,7 @@ data.
 Import file with scenarios as a dataframe.
 
 prev_id: id of preventive strategy
-Line10, Line11, Line18, Line19: Power flow in respetive lines
+Line10, Line11, Line18, Line19: Power flow in respective lines
 Area1 prod, Area2 prod, Area3 prod: total production in respective areas
 Area1 load, Area2 load, Area3 load: total load in respective areas
 inter_area_flow: inter-area flow
@@ -22,30 +22,28 @@ fault: which line has fault in given scenario
 corr: which area has corrective measure (load or production disconnected)
 Total cost: Total cost of system operation for given scenario
 
-Rest of columns are One hot encodings. Unsure if we need to differentiate between disconnected 
-load and production since we only have 3 possible corrective measures. ??
+Rest of columns are one-hot-encodings.
 """
 
-df = pd.read_csv(r"data\tot_cost_failure_scenarios_041021_multicorr2.csv")
+# df = pd.read_csv(r"data\tot_cost_failure_scenarios_041021_multicorr2.csv")
 
 # +
 """
 Classify  scenario as high or low cost based on threshold.
 """
 
-thresh = 1.13
+# thresh = 1.13
 
 df["Class"] = df.apply(lambda row: 0.0 if row["Total cost"] < thresh else 1.0, axis=1)
 
 # +
 """
-train_test_split splits data into train and test while also shuffling. test_size=0.2 puts 20% of data i test dataframe
+train_test_split splits data into train and test while also shuffling. Train 70%, validation 20%, test 10%
 random_state chooses seed for shuffling which gives more consistency for our process.
 
-When access to more data, should split into train, validation and test-set. ??
 
 Splitting into train and test set while keeping all scenarios with the same prev_id in the same set.
-Maybe not necessary in classification model.
+Maybe not necessary in classification model?
 """
 
 prev_ids = df.prev_id.unique()
@@ -70,7 +68,7 @@ test_df = pd.concat(test_df_list)
 
 # +
 """
-Absolute value of power flow as edge weights, since were using undirected graphs.
+Absolute value of power flow as edge weights, since were using MinMax-normalisation.
 """
 
 edge_weights_train = abs(train_df[["Line10", "Line11", "Line18", "Line19"]].values)
@@ -104,28 +102,29 @@ def create_input_data(
     y_dataset, edge_weights_dataset, dataset_df, is_training_set=False, batch_size=1
 ):
     """
-    Created a function to avoid triple code.
+    Created a function to avoid triple code. Can be moved to div_methods.py
     """
 
-    y_dataset = y_dataset.reshape((len(y_dataset), 1))
+    y_dataset = y_dataset.reshape((len(y_dataset) * 2, 1))
+    node_attr_dataset = abs(
+        dataset_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]].values
+    )
+    node_attr_dataset = node_attr_dataset.reshape((len(node_attr_dataset) * 4, 1))
     edge_weights_dataset = edge_weights_dataset.reshape(
         (len(edge_weights_dataset) * 4, 1)
     )
 
     if is_training_set:
         y_dataset = scale_y.fit_transform(y_dataset)
-        node_scaled_dataset = scale_node.fit_transform(
-            dataset_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]]
-        )
+        node_attr_dataset = scale_node.fit_transform(node_attr_dataset)
         edge_weights_dataset = scale_edge.fit_transform(edge_weights_dataset)
     else:
         y_dataset = scale_y.transform(y_dataset)
-        node_scaled_dataset = scale_node.transform(
-            dataset_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]]
-        )
+        node_attr_dataset = scale_node.transform(node_attr_dataset)
         edge_weights_dataset = scale_edge.transform(edge_weights_dataset)
 
-    y_dataset = y_dataset.reshape(-1)
+    y_dataset = y_dataset.reshape(int(len(y_dataset) / 2), 2)
+    node_attr_dataset = node_attr_dataset.reshape(int(len(node_attr_dataset) / 4), 4)
     edge_weights_dataset = edge_weights_dataset.reshape(
         int(len(edge_weights_dataset) / 4), 4
     )
@@ -134,12 +133,12 @@ def create_input_data(
     Creating node attributes.
     """
 
-    dataset_df.loc[:, "inter_area_flow_scaled"] = node_scaled_dataset[:, 0]
-    dataset_df.loc[:, "Area1_prod_scaled"] = node_scaled_dataset[:, 1]
-    dataset_df.loc[:, "Area2_prod_scaled"] = node_scaled_dataset[:, 2]
-    dataset_df.loc[:, "Area3_prod_scaled"] = node_scaled_dataset[:, 3]
+    dataset_df.loc[:, "inter_area_flow_scaled"] = node_attr_dataset[:, 0]
+    dataset_df.loc[:, "Area1_prod_scaled"] = node_attr_dataset[:, 1]
+    dataset_df.loc[:, "Area2_prod_scaled"] = node_attr_dataset[:, 2]
+    dataset_df.loc[:, "Area3_prod_scaled"] = node_attr_dataset[:, 3]
 
-    node_attr_dataset = dataset_df[
+    node_scaled_dataset = dataset_df[
         [
             "Area1-corr",
             "Area1-fault",
@@ -158,17 +157,13 @@ def create_input_data(
             "inter_area_flow_scaled",
         ]
     ].values
-    node_attr_dataset = node_attr_dataset.reshape(int(len(node_attr_dataset)), 3, 5)
-
-    """
-    We start by creating a dataset. This is done piecewise by creating 
-    a datapoint per scenario. Each datapoint is a single graph.
-    The goal is to construct a list of datapoints and then create the datasets from those.
-    """
+    node_scaled_dataset = node_scaled_dataset.reshape(
+        int(len(node_scaled_dataset)), 3, 5
+    )
 
     # Map function loops through all datapoints.
     graph_dataset = list(
-        map(div.create_dataset, y_dataset, edge_weights_dataset, node_attr_dataset)
+        map(div.create_dataset, y_dataset, edge_weights_dataset, node_scaled_dataset)
     )
 
     return DataLoader(graph_dataset, batch_size=batch_size)
@@ -208,7 +203,7 @@ is_third_layer: Boolean. If set to True, model will use 3 GCN layers.
                 Else, model will use 2 GCN-layers.
 """
 
-is_third_layer = True
+is_third_layer = False
 
 # Hyperparameters: Set based on hyperparameteroptimisation.
 hidden_channels = 12
@@ -234,7 +229,7 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(
 )  # Factor for learning rate decay
 
 # Weight based on the ratio between the majority and the minority class
-pos_weight = 3
+pos_weight = 6
 criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
 
 # +
@@ -297,7 +292,7 @@ df_results["target"] = y_target
 df_results["pred"] = y_pred
 df_results["prob"] = y_prob
 
-
+'''
 # +
 """Following is the hyperparameter-optimization loop done following the random search method.
 
@@ -402,3 +397,4 @@ print(
 print(
     f"a dropout rate of: {dropout_rate_list[value]:.4f} and an epoch number of: {epoch_list[value]}"
 )
+'''

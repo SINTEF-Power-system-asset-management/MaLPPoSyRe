@@ -8,10 +8,13 @@ df_opf = pd.read_csv("data/opf_280921.csv", header=[0, 1])
 
 corr_cost_list = list(df_costs.columns)[4:]
 
-failure_rate = 0.1
-sps_success = 1  # success rate for SPS
+failure_rate = 1
+sps_success = 1
 
-# df_costs["Total cost"] = df_costs.apply(lambda row: row["Dispatch costs"] + (failure_rate*row[corr_cost_list].sum()), axis=1)
+df_costs["Total cost"] = df_costs.apply(
+    lambda row: row["Dispatch costs"] + (failure_rate * row[corr_cost_list].sum()),
+    axis=1,
+)
 
 df_costs.rename(
     columns={"Unnamed: 0": "prev_id", "Unnamed: 1": "fault", "Unnamed: 2": "corr"},
@@ -28,17 +31,18 @@ def add_sps_succes(row):
             & (df["fault"] == row["fault"])
             & (df["corr"] == "fault")
         ].iloc[0]
-        total_cost = row["Dispatch costs"] + failure_rate * (
+        total_cost = failure_rate * (
             sps_success * (row[corr_cost_list].sum())
             + ((1 - sps_success) * (sps_fault[corr_cost_list].sum()))
         )
     else:
-        total_cost = row["Dispatch costs"] + (failure_rate * row[corr_cost_list].sum())
+        total_cost = failure_rate * row[corr_cost_list].sum()
 
     return total_cost
 
 
-df_costs["Total cost"] = df_costs.apply(add_sps_succes, axis=1)
+df_costs["Correction cost"] = df_costs.apply(add_sps_succes, axis=1)
+df_costs["Total cost"] = df_costs["Dispatch costs"] + df_costs["Correction cost"]
 
 # Join multi-index column names in dataframe
 df_opf.columns = ["_".join(col) for col in df_opf.columns.values]
@@ -117,7 +121,7 @@ merge2 = df_tot.copy()
 # One hot encoding to represent fault and corrective measures in nodes
 merge2["Area1-corr"] = merge2["corr"].apply(lambda x: 1 if x == "corr_G12" else 0)
 merge2["Area2-corr"] = merge2["corr"].apply(lambda x: 1 if x == "corr_G18" else 0)
-merge2["Area3-corr"] = merge2["corr"].apply(lambda x: 0.5 if x == "corr_L09" else 0)
+merge2["Area3-corr"] = merge2["corr"].apply(lambda x: 1 if x == "corr_L09" else 0)
 
 merge2["Area1-fault"] = merge2["fault"].apply(
     lambda x: 1 if x == "fault_L10" or x == "fault_L11" else 0
@@ -134,4 +138,4 @@ merge2["Area2-fault2"] = merge2["fault"].apply(lambda x: 1 if x == "fault_L19" e
 merge2["Area3-fault2"] = merge2["fault"].apply(lambda x: 1 if x == "fault_L19" else 0)
 
 # Save as .csv-file
-# merge2.to_csv('data/tot_cost_failure_scenarios_180122_01.csv', index = False)
+merge2.to_csv("data/tot_cost_failure_scenarios.csv", index=False)
