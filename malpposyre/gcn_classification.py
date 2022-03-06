@@ -25,25 +25,26 @@ Total cost: Total cost of system operation for given scenario
 Rest of columns are one-hot-encodings.
 """
 
-# df = pd.read_csv(r"data\tot_cost_failure_scenarios_041021_multicorr2.csv")
+# df = pd.read_csv(r'./data/tot_cost_failure_scenarios_240222.csv')
 
 # +
 """
-Classify  scenario as high or low cost based on threshold.
+Classify scenario as high or low cost based on threshold.
 """
 
-# thresh = 1.13
+#thresh = 1.13
 
 df["Class"] = df.apply(lambda row: 0.0 if row["Total cost"] < thresh else 1.0, axis=1)
 
 # +
+
 """
-train_test_split splits data into train and test while also shuffling. Train 70%, validation 20%, test 10%
+train_test_split splits data into train and test while also shuffling. Train 40%, validation 10%, test 50%
 random_state chooses seed for shuffling which gives more consistency for our process.
 
+Test dataset need to be large since this is what is used in regression model.
 
 Splitting into train and test set while keeping all scenarios with the same prev_id in the same set.
-Maybe not necessary in classification model?
 """
 
 prev_ids = df.prev_id.unique()
@@ -56,10 +57,10 @@ for prev_id in prev_ids:
 
 
 train_df_list, test_val_df_list = train_test_split(
-    df_list, test_size=0.3, random_state=1
+    df_list, test_size=0.6, random_state=1
 )
 val_df_list, test_df_list = train_test_split(
-    test_val_df_list, test_size=1 / 3, random_state=1
+    test_val_df_list, test_size= 5/6, random_state=1
 )
 
 train_df = pd.concat(train_df_list)
@@ -102,10 +103,10 @@ def create_input_data(
     y_dataset, edge_weights_dataset, dataset_df, is_training_set=False, batch_size=1
 ):
     """
-    Created a function to avoid triple code. Can be moved to div_methods.py
+    Can be generalised and moved to div_methods.py. Similar function used in other files.
     """
 
-    y_dataset = y_dataset.reshape((len(y_dataset) * 2, 1))
+    y_dataset = y_dataset.reshape((len(y_dataset), 1))
     node_attr_dataset = abs(
         dataset_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]].values
     )
@@ -123,7 +124,7 @@ def create_input_data(
         node_attr_dataset = scale_node.transform(node_attr_dataset)
         edge_weights_dataset = scale_edge.transform(edge_weights_dataset)
 
-    y_dataset = y_dataset.reshape(int(len(y_dataset) / 2), 2)
+    y_dataset = y_dataset.reshape(-1)
     node_attr_dataset = node_attr_dataset.reshape(int(len(node_attr_dataset) / 4), 4)
     edge_weights_dataset = edge_weights_dataset.reshape(
         int(len(edge_weights_dataset) / 4), 4
@@ -170,7 +171,8 @@ def create_input_data(
 
 
 """
-Possible to set batch size. So far, batch_size=1 given best results.
+Possible to set batch size. The batch size defines the number of 
+samples that will be propagated through the network.
 """
 
 batch_size = 1
@@ -213,38 +215,54 @@ learning_rate = 0.0005
 # Getting an example graph to get dimensions
 data_example = next(
     iter(training_dataset)
-)  # getting an example graph to get dimensions
+)
 
 model = div.GCN(
     data_example,
     hidden_channels=hidden_channels,
     dropout_rate=dropout_rate,
     isthird_layer=is_third_layer,
-    is_classification=True,
+    is_classification=True
 )
+
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 scheduler = torch.optim.lr_scheduler.ExponentialLR(
     optimizer, gamma=0.95
 )  # Factor for learning rate decay
 
-# Weight based on the ratio between the majority and the minority class
-pos_weight = 6
+# Weight based on the ratio between the majority and the minority class in training dataset
+pos_weight = 1/((y_train.sum())/len(y_train))
+
 criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
+
+"""
+Possible to set a thresh probability which is used as input for test_model_classification
+This is used for training. 
+
+On the test set, thresh probability is set in the Notebook based on F2-score.
+"""
+
+thresh_prob = 0.28
 
 # +
 """
 Below is a loop which trains the model over a set amount of epochs and 
 which prints the current epoch and the accuracy for the training-set and the test-set.
-In addition, a breakpoint (patience_value) has been defined so that if the mean accuracy is less than a 
-desired value for n number of epochs (patience_num), the training stops to prevent overfitting.
+Included simple early stopping to avoid overfitting. If the model has not improved over
+n epochs, training is stopped.
 
-num_epochs : Number of epochs in training
+num_epochs: Number of epochs in training
+patience: number of epochs with no improvement before training is stopped
+min_delta: minimum change qualified as improvement  
+
+All these parameters are set based on visual inspection of convergence plot given data set
 """
+
 num_epochs = 30
 
-patience_value = 0.00001
-patience_num = 10
+min_delta = 0.0001
+patience = 10
 
 train_list = np.array([])
 val_list = np.array([])
@@ -253,12 +271,8 @@ previous_acc_val = 0
 
 for epoch in range(1, num_epochs + 1):
     div.train_model(model, training_dataset, optimizer, scheduler, criterion)
-    train_acc = div.test_model(
-        model, training_dataset, batch_size=batch_size, classification=True
-    )
-    val_acc = div.test_model(
-        model, val_dataset, batch_size=batch_size, classification=True
-    )
+    train_acc = div.test_model_classification(model, training_dataset, thresh_prob=thresh_prob)
+    val_acc = div.test_model_classification(model, val_dataset, thresh_prob=thresh_prob)
     current_acc_val = val_acc
     print(
         f"Epoch: {epoch:03d}, Train Acc: {train_acc:.4f}, Validation Acc: {val_acc:.4f}"
@@ -268,7 +282,7 @@ for epoch in range(1, num_epochs + 1):
     acc_diff = np.concatenate(
         (acc_diff, abs(previous_acc_val - current_acc_val)), axis=None
     )
-    if acc_diff[-patience_num + 1 :].mean() < patience_value:
+    if acc_diff[-patience + 1 :].mean() < min_delta:
         print(f"solution converged at epoch: {epoch}")
         break
     else:
@@ -277,124 +291,122 @@ for epoch in range(1, num_epochs + 1):
 
 # +
 """
-df_results return results for test data
+df_results_classification return results for test data
 """
 
-test_acc = div.test_model(
-    model, test_dataset, batch_size=batch_size, classification=True
-)
-y_pred, y_prob, y_target, x_values = div.plotter(
-    model, test_dataset, is_classification=True
-)
+y_prob, y_target, x_values = div.plotter(model, test_dataset)
 
 df_results = test_df.copy()
 df_results["target"] = y_target
-df_results["pred"] = y_pred
 df_results["prob"] = y_prob
 
-'''
+
 # +
 """Following is the hyperparameter-optimization loop done following the random search method.
 
-The loop creates 200 models, each with a random learning rate, hidden channels number
+The loop creates 50 models, each with a random learning rate, hidden channels number
 and dropout rate number taken from a predefined range. 
-The loop then starts to train the model over 100 epochs, or 
-until the model has converged and the change in RMSE is lower than a set threshold.
+The loop then starts to train the model over chosen number of epochs, or 
+until the model has converged and the change in accuracy is lower than a set threshold.
 
-The RMSE value and all the other hyperparameters are stored in each their separate list,
-and when the loop has been iterated over, a second loop goes over the RMSE list and finds the
-hyperparameter-settings with the lowest RMSE values.
+The accuracy value and all the other hyperparameters are stored in each their separate list,
+and when the loop has been iterated over, a second loop goes over the accuracy list and finds the
+hyperparameter-settings with the lowest accuracy values.
 """
-max_acc_train_list = np.array([])
-max_acc_val_list = np.array([])
-lr_list = np.array([])
-hidden_channels_list = np.array([])
-dropout_rate_list = np.array([])
-epoch_list = np.array([])
 
-for i in range(50):
-    lr = random.randrange(1, 101) / 100000  # [0.001, 0.00001]
-    hidden_channels = random.randint(5, 51)
-    dropout_rate = random.randrange(0, 10) / 20  # [0, 0.5]
-    # is_third_layer = bool(random.getrandbits(1))
-    num_epochs = 50
+is_tuning = False
 
-    model = div.GCN(
-        data_example,
-        hidden_channels=hidden_channels,
-        dropout_rate=dropout_rate,
-        isthird_layer=is_third_layer,
+if is_tuning:
+    max_acc_train_list = np.array([])
+    max_acc_val_list = np.array([])
+    lr_list = np.array([])
+    hidden_channels_list = np.array([])
+    dropout_rate_list = np.array([])
+    epoch_list = np.array([])
+
+    for i in range(50):
+        lr = random.randrange(1, 101) / 100000  # [0.001, 0.00001]
+        hidden_channels = random.randint(5, 51)
+        dropout_rate = random.randrange(0, 10) / 20  # [0, 0.5]
+        # is_third_layer = bool(random.getrandbits(1))
+        num_epochs = 50
+
+        model = div.GCN(
+            data_example,
+            hidden_channels=hidden_channels,
+            dropout_rate=dropout_rate,
+            isthird_layer=is_third_layer,
+        )
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
+
+        previous_acc_val = 0
+        for epoch in range(1, num_epochs + 1):
+            div.train_model(model, training_dataset, optimizer, scheduler, criterion)
+            train_acc = div.test_model(
+                model, training_dataset, batch_size=batch_size, classification=True
+            )
+            val_acc = div.test_model(
+                model, val_dataset, batch_size=batch_size, classification=True
+            )
+            current_acc_train = train_acc
+            current_acc_val = val_acc
+            """Here the min values are initialized if this is the first time through the loop.
+            """
+            if epoch == 1:
+                max_acc_train = current_acc_train
+                max_acc_val = current_acc_val
+            """Here the minimum value for the train & val rmse is changed if the current value is smaller than the current min value
+            """
+            if current_acc_train > max_acc_train:
+                max_acc_train = current_acc_train
+
+            if current_acc_val > max_acc_val:
+                max_acc_val = current_acc_val
+            """Here I create the option to break out of the loop if the solution converges
+            """
+            acc_diff = np.concatenate(
+                (acc_diff, abs(previous_acc_val - current_acc_val)), axis=None
+            )
+            if acc_diff[-patience + 1 :].mean() < min_delta:
+                print(f"solution converged at epoch: {epoch}")
+                break
+            else:
+                previous_acc_val = current_acc_val
+
+        max_acc_train_list = np.concatenate((max_acc_train_list, max_acc_train), axis=None)
+        max_acc_val_list = np.concatenate((max_acc_val_list, max_acc_val), axis=None)
+        lr_list = np.append(lr_list, lr)
+        hidden_channels_list =np.append(hidden_channels_list, hidden_channels)
+        dropout_rate_list = np.append(dropout_rate_list, dropout_rate)
+        epoch_list = np.append(epoch_list, epoch)
+
+
+    # +
+    """
+    Here I find the index of the max accuracy. This is done this way
+    as pytorch doesn't have a method of doing it.
+    """
+
+    value = 0
+    for i in range(len(max_acc_val_list)):
+        if i == 0:
+            max_acc = max_acc_val_list[i]
+
+        if max_acc_val_list[i] > max_acc:
+            max_acc = max_acc_val_list[i]
+            value = i
+
+    print(max_acc)
+    print(value)
+
+    print(
+        f"The lowest total MSE value, {max_acc_val_list[value]:.7f}, for the vallidation set was found with the following settings: "
     )
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
+    print(
+        f"a learning rate of: {lr_list[value]:.4f}, a hidden channel nr of: {hidden_channels_list[value]}"
+    )
+    print(
+        f"a dropout rate of: {dropout_rate_list[value]:.4f} and an epoch number of: {epoch_list[value]}"
+    )
 
-    previous_acc_val = 0
-    for epoch in range(1, num_epochs + 1):
-        div.train_model(model, training_dataset, optimizer, scheduler, criterion)
-        train_acc = div.test_model(
-            model, training_dataset, batch_size=batch_size, classification=True
-        )
-        val_acc = div.test_model(
-            model, val_dataset, batch_size=batch_size, classification=True
-        )
-        current_acc_train = train_acc
-        current_acc_val = val_acc
-        """Here the min values are initialized if this is the first time through the loop.
-        """
-        if epoch == 1:
-            max_acc_train = current_acc_train
-            max_acc_val = current_acc_val
-        """Here the minimum value for the train & val rmse is changed if the current value is smaller than the current min value
-        """
-        if current_acc_train > max_acc_train:
-            max_acc_train = current_acc_train
-
-        if current_acc_val > max_acc_val:
-            max_acc_val = current_acc_val
-        """Here I create the option to break out of the loop if the solution converges
-        """
-        acc_diff = np.concatenate(
-            (acc_diff, abs(previous_acc_val - current_acc_val)), axis=None
-        )
-        if acc_diff[-patience_num + 1 :].mean() < patience_value:
-            print(f"solution converged at epoch: {epoch}")
-            break
-        else:
-            previous_acc_val = current_acc_val
-
-    max_acc_train_list = np.concatenate((max_acc_train_list, max_acc_train), axis=None)
-    max_acc_val_list = np.concatenate((max_acc_val_list, max_acc_val), axis=None)
-    lr_list = np.append(lr_list, lr)
-    hidden_channels_list = np.append(hidden_channels_list, hidden_channels)
-    dropout_rate_list = np.append(dropout_rate_list, dropout_rate)
-    epoch_list = np.append(epoch_list, epoch)
-
-
-# +
-"""
-Here I find the index of the max accuracy. This is done this way
-as pytorch doesn't have a method of doing it.
-"""
-
-value = 0
-for i in range(len(max_acc_val_list)):
-    if i == 0:
-        max_acc = max_acc_val_list[i]
-
-    if max_acc_val_list[i] > max_acc:
-        max_acc = max_acc_val_list[i]
-        value = i
-
-print(max_acc)
-print(value)
-
-print(
-    f"The lowest total MSE value, {max_acc_val_list[value]:.7f}, for the vallidation set was found with the following settings: "
-)
-print(
-    f"a learning rate of: {lr_list[value]:.4f}, a hidden channel nr of: {hidden_channels_list[value]}"
-)
-print(
-    f"a dropout rate of: {dropout_rate_list[value]:.4f} and an epoch number of: {epoch_list[value]}"
-)
-'''

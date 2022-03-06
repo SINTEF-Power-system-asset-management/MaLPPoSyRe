@@ -269,7 +269,7 @@ previous_error_val = 0
 
 for epoch in range(1, num_epochs + 1):
     div.train_model(
-        model, training_dataset, optimizer, scheduler, criterion, calc_rmse=is_rmse
+        model, training_dataset, optimizer, scheduler, criterion, is_rmse=is_rmse
     )
     train_acc = div.test_model(
         model, training_dataset, batch_size=batch_size, scale=scale_y, calc_rmse=is_rmse

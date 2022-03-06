@@ -5,12 +5,13 @@ import random as random
 from sklearn.model_selection import train_test_split
 import torch
 from torch_geometric.data import DataLoader
+import datetime
 
 # +
 """
 Estimating costs linked to failure scenarios, preventive and corrective strategies.
 
-Import file with scenarios as a dataframe.
+Import file with scenarios as a dataframe. Input data is results from the classification model.
 
 prev_id: id of preventive strategy
 Line10, Line11, Line18, Line19: Power flow in respective lines
@@ -25,24 +26,10 @@ Rest of columns are one-hot-encodings.
 """
 
 """
-If running script from Notebook, do not define df here.
+NB! If running script from Notebook, do not define df here.
 """
 
-# df = pd.read_csv(r'data\tot_cost_failure_scenarios_041021_multicorr2.csv')
-# df = pd.read_csv(r'./data/tot_cost_failure_scenarios_180122_01.csv')
-
-# +
-"""
-If set_max_cost = True, values higher than max_cost will be removed
-Or values higher than set_max can be set to set_max
-"""
-
-set_max_cost = True
-max_cost = 10  # 1.128
-
-if set_max_cost:
-    df = df[df["Total cost"] < max_cost]
-    # df.loc[df["Total cost"] > max_cost, "Total cost"] = max_cost
+# df = pd.read_csv(r'./results/input_regression_040322.csv')
 
 
 # +
@@ -223,17 +210,16 @@ is_third_layer: Boolean. If set to True, model will use 3 GCN layers.
 """
 
 
-is_rmse = False
-is_third_layer = True
+is_rmse = True
+is_third_layer = False
 
 # Hyperparameters: Set based on hyperparameteroptimisation.
-hidden_channels = 12
-dropout_rate = 0.2
-learning_rate = 0.0075
+hidden_channels = 41
+dropout_rate = 0.35
+learning_rate = 0.0055
 
 # Getting an example graph to get dimensions
 data_example = next(iter(training_dataset))
-
 
 model = div.GCN(
     data_example,
@@ -250,107 +236,27 @@ scheduler = torch.optim.lr_scheduler.ExponentialLR(
 
 criterion = torch.nn.MSELoss()
 
-# Double check if these are different from the methods in div_methods.py to avoid double code
-
-
-def train_model():
-    """Training function which trains the model.
-    The function iterates over the training set, estimates the y-value and
-    compares it with the actual value. The RMSE and the gradients are then
-    calculated and are fed back to the optimization function which
-    updates the weights of the neural network.
-    """
-    model.train()
-    for data in training_dataset:  # Iterate in batches over the training dataset.
-        optimizer.zero_grad()  # Clear gradients.
-        out = model(data)  # Output value of the model
-        loss = torch.sqrt(criterion(out, data.y[0]))  # Compute the loss.
-        # loss = criterion(out, data.y)
-        loss.backward()  # Derive gradients.
-        optimizer.step()  # Update parameters based on gradients.
-    scheduler.step()  # Reduction of learning rate
-
-
-def test_model(loader):
-    """Test function which evaluates the model by
-    calculating the Root Mean Square Error
-
-    Args:
-    Loader - Dataset input, either training or test
-
-    Creates:
-
-    Root Mean Square Error between the:
-    out - output value from the model
-    data.y - actual value
-
-    if Choice = 0, the function assume a transformation method
-    was used and will try to inverse-transform the values before
-    calculating the RMSE.
-    If choice =/= 0, the RMSE is calculated directly as there
-    hasn't been used a transformation method on the data.
-    """
-    model.eval()
-    SE = 0
-    for data in loader:  # Iterate in batches over the training/test dataset
-        out = model(data)  # define the output value
-        out = out.reshape(-1, 2)  # Reshape the size of the tensor
-        out = scale_y.inverse_transform(
-            out.detach().numpy()
-        )  # Inverse transform the value
-        y = data.y
-        y = y.reshape(-1, 2)  # Reshaping the size of the tensor
-        y = scale_y.inverse_transform(
-            y.detach().numpy()
-        )  # Inverse transforming the value
-        SE += (out - y) ** 2  # Sum over the SE
-    RMSE = np.sqrt(SE.sum() / len(loader.dataset))
-    return RMSE  # Finally we return the RMSE
-
-
-def plotter(loader):
-    """Plotter Function which returns the predicted value,
-    the target value and the x value which can be used for plotting
-    after the model has been trained.
-    Args:
-
-    Loader - Dataset input, either training or test
-
-    Creates:
-
-    y_target - target value
-    y_pred - predicted value from the model
-    x_values - Scenario value. (p1, p11, p111 etc)
-    """
-    model.eval()
-    y_pred = []
-    y_target = []
-    x_values = []
-    i = 0
-    for data in loader:
-        i += 1
-        out = model(data)
-        y_target.append(data.y[0][0].detach().numpy())
-        y_pred.append(out[0].detach().numpy())
-        x_values.append(i)
-    return y_pred, y_target, x_values
-
-
 # +
 """
 Below is a loop which trains the model over a set amount of epochs and 
 which prints the current epoch and the RMSE/MSE values for the training-set and the test-set.
 The MSE/RMSE values and the epoch values are stored in separate lists.
-In addition, a breakpoint (patience_value) has been defined so that if the mean MSE/RMSE is less than a 
-desired value for n number of epochs (patience_num), the training stops to prevent overfitting.
 
-num_epochs : Number of epochs in training
+Included simple early stopping to avoid overfitting. If the model has not improved over
+n epochs, training is stopped.
+
+num_epochs: Number of epochs in training
+patience: number of epochs with no improvement before training is stopped
+min_delta: minimum change qualified as improvement  
+
+All these parameters are set based on visual inspection of convergence plot given data set
+
 """
 
 num_epochs = 80
 
-patience_value = 0.00000001
-patience_num = 5
+min_delta = 0.00001
+patience = 5
 
 train_list = np.array([])
 val_list = np.array([])
@@ -358,9 +264,15 @@ err_diff = np.array([])
 previous_error_val = 0
 
 for epoch in range(1, num_epochs + 1):
-    train_model()
-    train_acc = test_model(training_dataset)
-    val_acc = test_model(val_dataset)
+    div.train_model(
+        model, training_dataset, optimizer, scheduler, criterion, is_rmse=is_rmse, output_dim=2
+    )
+    train_acc = div.test_model_regression(
+        model, training_dataset, scale=scale_y, is_rmse=is_rmse, output_dim=2
+    )
+    val_acc = div.test_model_regression(
+        model, val_dataset, scale=scale_y, is_rmse=is_rmse, output_dim=2
+    )
     current_error_val = val_acc
     print(
         f"Epoch: {epoch:03d}, Train Acc: {train_acc:.6f}, Validation Acc: {val_acc:.6f}"
@@ -370,7 +282,7 @@ for epoch in range(1, num_epochs + 1):
     err_diff = np.concatenate(
         (err_diff, abs(previous_error_val - current_error_val)), axis=None
     )
-    if err_diff[-patience_num + 1 :].mean() < patience_value:
+    if err_diff[-patience + 1:].mean() < min_delta:
         print(f"solution converged at epoch: {epoch}")
         break
     else:
@@ -379,10 +291,12 @@ for epoch in range(1, num_epochs + 1):
 
 # +
 """
-df_results return results for test data
+df_results return results for test data after transforming back.
 """
-test_acc = test_model(test_dataset)
-y_pred, y_target, x_values = plotter(test_dataset)
+test_acc = div.test_model_regression(
+    model, test_dataset, scale=scale_y, is_rmse=is_rmse, output_dim=2)
+
+y_pred, y_target, scenarios = div.plotter(model, test_dataset)
 
 y_pred2 = scale_y.inverse_transform(np.array(y_pred).reshape(-1, 2))
 y_target2 = scale_y.inverse_transform(np.array(y_target).reshape(-1, 2))
@@ -392,7 +306,6 @@ df_results[["Dispatch_cost_target", "Correction_cost_target"]] = y_target2
 df_results[["Dispatch_cost_pred", "Correction_cost_pred"]] = y_pred2
 # -
 
-'''
 # +
 """Following is the hyperparameter-optimization loop done following the random search method.
 
@@ -404,112 +317,119 @@ until the model has converged and the change in RMSE is lower than a set thresho
 The RMSE value and all the other hyperparameters are stored in each their separate list,
 and when the loop has been iterated over, a second loop goes over the RMSE list and finds the
 hyperparameter-settings with the lowest RMSE values.
+
+is_tuning: Boolean. If true script runs hyperparameteroptimalisation.
 """
-min_error_train_list = np.array([])
-min_error_val_list = np.array([])
-err_diff = np.array([])
-lr_list = np.array([])
-hidden_channels_list = np.array([])
-dropout_rate_list = np.array([])
-epoch_list = np.array([])
 
-patience_value = 0.000001
-patience_num = 10
+is_tuning = False
 
-for i in range(50):
-    lr = random.randrange(1, 101) / 10000  # [0.01, 0.0001]
-    hidden_channels = random.randint(5, 51)
-    dropout_rate = random.randrange(0, 10) / 20  # [0, 0.5]
-    # is_third_layer = bool(random.getrandbits(1))
-    num_epochs = 80
+if is_tuning:
+    begin_time = datetime.datetime.now()
+    min_error_train_list = np.array([])
+    min_error_val_list = np.array([])
+    err_diff = np.array([])
+    lr_list = np.array([])
+    hidden_channels_list = np.array([])
+    dropout_rate_list = np.array([])
+    epoch_list = np.array([])
 
-    model = div.GCN(
-        data_example,
-        hidden_channels=hidden_channels,
-        dropout_rate=dropout_rate,
-        isthird_layer=is_third_layer,
+    min_delta = 0.000001
+    patience = 10
+
+    for i in range(50):
+        print(f"Execution time for {i - 1}: {datetime.datetime.now() - begin_time}")
+        lr = random.randrange(1, 101) / 10000  # [0.01, 0.0001]
+        hidden_channels = random.randint(5, 51)
+        dropout_rate = random.randrange(0, 10) / 20  # [0, 0.5]
+        # is_third_layer = bool(random.getrandbits(1))
+        print(f"Model n#: {i} with learning rate: {lr}, hidden channels: {hidden_channels} and dropout rate: {dropout_rate}.")
+        num_epochs = 80
+
+        model = div.GCN(
+            data_example,
+            hidden_channels=hidden_channels,
+            output_dim=2,
+            dropout_rate=dropout_rate,
+            isthird_layer=is_third_layer,
+        )
+        optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+        criterion = torch.nn.MSELoss()
+
+        min_error_train = 0
+        min_error_val = 0
+        previous_error_val = 0
+        for epoch in range(1, num_epochs + 1):
+            div.train_model(
+                model, training_dataset, optimizer, scheduler, criterion, is_rmse=is_rmse, output_dim=2
+            )
+            train_acc = div.test_model_regression(
+                model, training_dataset, scale=scale_y, is_rmse=is_rmse, output_dim=2
+            )
+            val_acc = div.test_model_regression(
+                model, val_dataset, scale=scale_y, is_rmse=is_rmse, output_dim=2
+            )
+
+            current_error_train = train_acc
+            current_error_val = val_acc
+            """Here the min values are initialized if this is the first time through the loop.
+            """
+            if epoch == 1:
+                min_error_train = current_error_train
+                min_error_val = current_error_val
+            """Here the minimum value for the train & validation rmse is changed if the current value is smaller than the current min value
+            """
+            if current_error_train < min_error_train:
+                min_error_train = current_error_train
+
+            if current_error_val < min_error_val:
+                min_error_val = current_error_val
+            """Here I create the option to break out of the loop if the solution converges
+            """
+            err_diff = np.concatenate(
+                (err_diff, abs(previous_error_val - current_error_val)), axis=None
+            )
+            if err_diff[-patience + 1 :].mean() < min_delta:
+                print(f"solution converged at epoch: {epoch}")
+                break
+            else:
+                previous_error_val = current_error_val
+
+        min_error_train_list = np.concatenate(
+            (min_error_train_list, min_error_train), axis=None
+        )
+        min_error_val_list = np.concatenate((min_error_val_list, min_error_val), axis=None)
+        lr_list = np.append(lr_list, lr)
+        hidden_channels_list = np.append(hidden_channels_list, hidden_channels)
+        dropout_rate_list = np.append(dropout_rate_list, dropout_rate)
+        epoch_list = np.append(epoch_list, epoch)
+
+
+    # +
+    """
+    Here I find the index of the minimum value of the (R)MSE. This is done this way
+    as pytorch don't have a method of doing it.
+    """
+
+    value = 0
+    min_error = 0
+    for i in range(len(min_error_val_list)):
+        if min_error == 0:
+            min_error = min_error_val_list[i]
+
+        if min_error_val_list[i] < min_error:
+            min_error = min_error_val_list[i]
+            value = i
+
+    print(min_error)
+    print(value)
+
+    print(
+        f"The lowest total MSE value, {min_error_val_list[value]:.7f}, for the test set was found with the following settings: "
     )
-    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
-    criterion = torch.nn.MSELoss()
-
-    min_error_train = 0
-    min_error_val = 0
-    previous_error_val = 0
-    for epoch in range(1, num_epochs + 1):
-        div.train_model(
-            model, training_dataset, optimizer, scheduler, criterion, calc_rmse=is_rmse
-        )
-        train_acc = div.test_model(
-            model,
-            training_dataset,
-            batch_size=batch_size,
-            scale=scale_y,
-            calc_rmse=is_rmse,
-        )
-        val_acc = div.test_model(
-            model, val_dataset, batch_size=batch_size, scale=scale_y, calc_rmse=is_rmse
-        )
-        current_error_train = train_acc
-        current_error_val = val_acc
-        """Here the min values are initialized if this is the first time through the loop.
-        """
-        if epoch == 1:
-            min_error_train = current_error_train
-            min_error_val = current_error_val
-        """Here the minimum value for the train & validation rmse is changed if the current value is smaller than the current min value
-        """
-        if current_error_train < min_error_train:
-            min_error_train = current_error_train
-
-        if current_error_val < min_error_val:
-            min_error_val = current_error_val
-        """Here I create the option to break out of the loop if the solution converges
-        """
-        err_diff = np.concatenate(
-            (err_diff, abs(previous_error_val - current_error_val)), axis=None
-        )
-        if err_diff[-patience_num + 1 :].mean() < patience_value:
-            print(f"solution converged at epoch: {epoch}")
-            break
-        else:
-            previous_error_val = current_error_val
-
-    min_error_train_list = np.concatenate(
-        (min_error_train_list, min_error_train), axis=None
+    print(
+        f"a learning rate of: {lr_list[value]:.4f}, a hidden channel nr of: {hidden_channels_list[value]}"
     )
-    min_error_val_list = np.concatenate((min_error_val_list, min_error_val), axis=None)
-    lr_list = np.append(lr_list, lr)
-    hidden_channels_list = np.append(hidden_channels_list, hidden_channels)
-    dropout_rate_list = np.append(dropout_rate_list, dropout_rate)
-    epoch_list = np.append(epoch_list, epoch)
+    print(
+        f"a dropout rate of: {dropout_rate_list[value]:.4f} and an epoch number of: {epoch_list[value]}"
+    )
 
-
-# +
-"""
-Here I find the index of the minimum value of the RMSE. This is done this way
-as pytorch don't have a method of doing it.
-"""
-
-value = 0
-min_error = 0
-for i in range(len(min_error_val_list)):
-    if min_error == 0:
-        min_error = min_error_val_list[i]
-
-    if min_error_val_list[i] < min_error:
-        min_error = min_error_val_list[i]
-        value = i
-
-print(min_error)
-print(value)
-
-print(
-    f"The lowest total MSE value, {min_error_val_list[value]:.7f}, for the test set was found with the following settings: "
-)
-print(
-    f"a learning rate of: {lr_list[value]:.4f}, a hidden channel nr of: {hidden_channels_list[value]}"
-)
-print(
-    f"a dropout rate of: {dropout_rate_list[value]:.4f} and an epoch number of: {epoch_list[value]}"
-)
-'''

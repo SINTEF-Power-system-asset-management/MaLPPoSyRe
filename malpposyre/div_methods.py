@@ -73,7 +73,7 @@ class GCN(torch.nn.Module):
         # 1. Obtain node embeddings
         x, edge_index, edge_weight = data.x, data.edge_index, data.edge_attr
         y = self.conv1(x, edge_index, edge_weight)
-        y = y.relu()
+        #y = y.relu()
 
         y = self.conv2(y, edge_index, edge_weight)
         y = y.relu()
@@ -125,7 +125,7 @@ def create_dataset(y_value, edge_weights, node_attr):
     return Data(x=x, edge_index=edge_index, edge_attr=edge_attribute, y=y)
 
 
-def plotter(model, loader, is_classification=False):
+def plotter(model, loader):
     """Plotter Function which returns the predicted value,
     the target value and the x value which can be used for plotting
     after the model has been trained.
@@ -138,28 +138,23 @@ def plotter(model, loader, is_classification=False):
     Creates:
 
     y_target - target value
-    y_pred - predicted value from the model
+    y_pred - for regression: predicted value from the model. for classification
     scenarios - Scenario value
     """
     model.eval()
     y_pred = np.array([])
     y_target = np.array([])
-    y_pred_prob = np.array([])
     for data in loader:
         out = model(data)
-        pred = out
-        if is_classification:
-            pred = np.round(out.detach())
-        y_target = np.concatenate((y_target, data.y.reshape(-1)), axis=None)
-        y_pred = np.concatenate((y_pred, pred.detach().numpy()), axis=None)
-        y_pred_prob = np.concatenate((y_pred_prob, out.detach().numpy()), axis=None)
+        y_target = np.concatenate((y_target, data.y.detach().numpy()), axis=None)
+        y_pred = np.concatenate((y_pred, out.detach().numpy()), axis=None)
 
     scenarios = np.arange(1, len(y_pred) + 1)
-    return y_pred, y_pred_prob, y_target, scenarios
+    return y_pred, y_target, scenarios
 
 
 def train_model(
-    model, training_dataset, optimizer, scheduler, criterion, calc_rmse=False
+    model, training_dataset, optimizer, scheduler, criterion, is_rmse=False, output_dim=1,
 ):
     """Training function which trains the model.
     The function iterates over the training set, estimates the y-value and
@@ -171,26 +166,56 @@ def train_model(
     for data in training_dataset:  # Iterate in batches over the training dataset.
         optimizer.zero_grad()  # Clear gradients.
         out = model(data)  # Output value of the model
-        loss = criterion(out, data.y)
-        if calc_rmse:
-            loss = torch.sqrt(criterion(out, data.y))
+        loss = criterion(out, data.y.reshape(1, output_dim))
+        if is_rmse:
+            loss = torch.sqrt(criterion(out, data.y.reshape(1, output_dim)))
         loss.backward()  # Derive gradients.
         optimizer.step()  # Update parameters based on gradients.
     scheduler.step()  # Reduction of learning rate
 
 
-def test_model(
+def test_model_classification(
     model,
     loader,
-    batch_size=1,
+    thresh_prob=0.5
+):
+    """Test function which evaluates the model by
+    calculating the accuracy for classification.
+
+    Args:
+    model: GCN model
+    loader: Dataset input, either training or test
+    thresh_prob: the probability threshold for class prediction
+
+    Creates:
+
+    Error between the:
+    out - output value from the model
+    data.y - actual value
+    """
+
+    model.eval()
+    TP = 0
+    for data in loader:  # Iterate in batches over the training/test dataset
+        out = model(data)  # define the output value
+        pred = torch.Tensor([1 if x > thresh_prob else 0 for x in out])
+        pred = pred.reshape(-1, 1)
+        y = data.y
+        y = y.reshape(-1, 1)  # Reshaping the size of the tensor
+        TP += int((pred == y).sum())  # Check against ground-truth labels.
+    acc = TP / len(loader.dataset)
+    return acc  # Finally we return the loss
+
+def test_model_regression(
+    model,
+    loader,
     output_dim=1,
     scale=None,
     transform_data=True,
-    calc_rmse=False,
-    classification=False,
+    is_rmse=False,
 ):
     """Test function which evaluates the model by
-    calculating the MSE og RMSE
+    calculating the MSE/RMSE
 
     Args:
     model - GCN model
@@ -199,7 +224,6 @@ def test_model(
     scale - if transformation is used add scaler
     transform_data - boolean. Set to true if transformation is used
     calc_rmse - boolean, only used if regression. calculates RMSE if set to True, else MSE
-    classification - boolean. Set to True if classification problem.
 
     Creates:
 
@@ -207,20 +231,6 @@ def test_model(
     out - output value from the model
     data.y - actual value
     """
-    if classification:
-        model.eval()
-        TP = 0
-        for data in loader:  # Iterate in batches over the training/test dataset
-            out = model(data)  # define the output value
-            # out = out.reshape(-1, 1)  # Reshape the size of the tensor
-            # pred = torch.Tensor([1 if x > 0.5 else 0 for x in out])
-            pred = np.round(out.detach())  # cut-off at 0.5
-            pred = pred.reshape(-1, output_dim)
-            y = data.y
-            y = y.reshape(-1, 1)  # Reshaping the size of the tensor
-            TP += int((pred == y).sum())  # Check against ground-truth labels.
-        acc = TP / len(loader.dataset)
-        return acc  # Finally we return the loss
 
     if transform_data:
         model.eval()
@@ -232,7 +242,7 @@ def test_model(
                 out.detach().numpy()
             )  # Inverse transform the value
             y = data.y
-            y = y.reshape(-1, 1)  # Reshaping the size of the tensor
+            y = y.reshape(-1, output_dim)  # Reshaping the size of the tensor
             y = scale.inverse_transform(
                 y.detach().numpy()
             )  # Inverse transforming the value
@@ -246,6 +256,6 @@ def test_model(
             SE += ((out - data.y) ** 2).sum()  # Sum over the SE
         MSE = SE / (len(loader.dataset))
 
-    if calc_rmse:
+    if is_rmse:
         return np.sqrt(MSE)
     return MSE

@@ -2,19 +2,13 @@ import pandas as pd
 
 # Import all needed dataframes
 df_flow = pd.read_csv("data/flow_280921.csv")
+#df_flow = pd.read_csv("data/prev_line_caps.csv")
 df_costs = pd.read_csv("data/costs_280921.csv")
 df_opf = pd.read_csv("data/opf_280921.csv", header=[0, 1])
 
 
 corr_cost_list = list(df_costs.columns)[4:]
 
-failure_rate = 1
-sps_success = 1
-
-df_costs["Total cost"] = df_costs.apply(
-    lambda row: row["Dispatch costs"] + (failure_rate * row[corr_cost_list].sum()),
-    axis=1,
-)
 
 df_costs.rename(
     columns={"Unnamed: 0": "prev_id", "Unnamed: 1": "fault", "Unnamed: 2": "corr"},
@@ -22,27 +16,10 @@ df_costs.rename(
 )
 
 
-def add_sps_succes(row):
-    corr_cost_list = ["CENS", "FCR cost", "Redispatch cost", "SPS cost"]
-    df = df_costs.copy()
-    if row["corr"] != "fault":  # if scenario with SPS
-        sps_fault = df[
-            (df["prev_id"] == row["prev_id"])
-            & (df["fault"] == row["fault"])
-            & (df["corr"] == "fault")
-        ].iloc[0]
-        total_cost = failure_rate * (
-            sps_success * (row[corr_cost_list].sum())
-            + ((1 - sps_success) * (sps_fault[corr_cost_list].sum()))
-        )
-    else:
-        total_cost = failure_rate * row[corr_cost_list].sum()
-
-    return total_cost
+df_costs["Correction cost"] = df_costs.apply(lambda row: row[corr_cost_list].sum(), axis=1)
 
 
-df_costs["Correction cost"] = df_costs.apply(add_sps_succes, axis=1)
-df_costs["Total cost"] = df_costs["Dispatch costs"] + df_costs["Correction cost"]
+df_costs["Total cost"] = df_costs["Dispatch costs"] + df_costs["Correction cost"] 
 
 # Join multi-index column names in dataframe
 df_opf.columns = ["_".join(col) for col in df_opf.columns.values]
@@ -137,5 +114,13 @@ merge2["Area1-fault2"] = merge2["fault"].apply(lambda x: 0)
 merge2["Area2-fault2"] = merge2["fault"].apply(lambda x: 1 if x == "fault_L19" else 0)
 merge2["Area3-fault2"] = merge2["fault"].apply(lambda x: 1 if x == "fault_L19" else 0)
 
+merge3 = merge2[['prev_id', 'Line10', 'Line11', 'Line18', 'Line19', 'fault', 'corr',
+       'Dispatch costs', 'CENS', 'FCR cost', 'Redispatch cost', 'SPS cost',
+       'Correction cost', 'Total cost', 'Area1-corr', 'Area2-corr',
+       'Area3-corr', 'Area1-fault', 'Area2-fault', 'Area3-fault',
+       'Area1-fault2', 'Area2-fault2', 'Area3-fault2']].dropna()
+
 # Save as .csv-file
-merge2.to_csv("data/tot_cost_failure_scenarios.csv", index=False)
+#merge3.to_csv('data/tot_cost_failure_scenarios.csv', index = False)
+
+
