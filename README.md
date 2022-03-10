@@ -16,4 +16,5 @@ In order to visualise while running the code, assigned notebooks can be used, `N
 
 `NNConv_regression.py` and `NNConv_classification.py`, set up using NNConv, which allows including edge attributes.
 
-`gcn_regression.py` - not in use
+`gcn_regression.py` - used for single output regression. 
+
