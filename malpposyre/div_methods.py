@@ -73,7 +73,7 @@ class GCN(torch.nn.Module):
         # 1. Obtain node embeddings
         x, edge_index, edge_weight = data.x, data.edge_index, data.edge_attr
         y = self.conv1(x, edge_index, edge_weight)
-        #y = y.relu()
+        y = y.relu()
 
         y = self.conv2(y, edge_index, edge_weight)
         y = y.relu()

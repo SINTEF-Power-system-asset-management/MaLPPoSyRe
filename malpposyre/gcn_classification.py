@@ -32,14 +32,14 @@ Rest of columns are one-hot-encodings.
 Classify scenario as high or low cost based on threshold.
 """
 
-#thresh = 1.13
+# thresh = 1.13
 
 df["Class"] = df.apply(lambda row: 0.0 if row["Total cost"] < thresh else 1.0, axis=1)
 
 # +
 
 """
-train_test_split splits data into train and test while also shuffling. Train 40%, validation 10%, test 50%
+train_test_split splits data into train and test while also shuffling. Train 70%, validation 10%, test 20%
 random_state chooses seed for shuffling which gives more consistency for our process.
 
 Test dataset need to be large since this is what is used in regression model.
@@ -57,10 +57,10 @@ for prev_id in prev_ids:
 
 
 train_df_list, test_val_df_list = train_test_split(
-    df_list, test_size=0.6, random_state=1
+    df_list, test_size=0.3, random_state=1
 )
 val_df_list, test_df_list = train_test_split(
-    test_val_df_list, test_size= 5/6, random_state=1
+    test_val_df_list, test_size=1 / 3, random_state=1
 )
 
 train_df = pd.concat(train_df_list)
@@ -261,7 +261,7 @@ All these parameters are set based on visual inspection of convergence plot give
 
 num_epochs = 30
 
-min_delta = 0.0001
+min_delta = 0.001
 patience = 10
 
 train_list = np.array([])

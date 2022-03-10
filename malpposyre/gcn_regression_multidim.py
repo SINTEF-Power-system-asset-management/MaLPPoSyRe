@@ -27,9 +27,11 @@ Rest of columns are one-hot-encodings.
 
 """
 NB! If running script from Notebook, do not define df here.
+
+NB: Commenting out this part, since the train and val sets are defined in classification have been used to train the model. Test sets are results from classification.
 """
 
-# df = pd.read_csv(r'./results/input_regression_040322.csv')
+#df = pd.read_csv(r'./results/input_regression_040322.csv')
 
 
 # +
@@ -40,25 +42,25 @@ random_state chooses seed for shuffling which gives more consistency for our pro
 Splitting into train and test set while keeping all scenarios with the same prev_id in the same set
 """
 
-prev_ids = df.prev_id.unique()
+#prev_ids = df.prev_id.unique()
 
-grouped = df.groupby(df.prev_id)
+#grouped = df.groupby(df.prev_id)
 
-df_list = []
-for prev_id in prev_ids:
-    df_list.append(grouped.get_group(prev_id))
+#df_list = []
+#for prev_id in prev_ids:
+#    df_list.append(grouped.get_group(prev_id))
 
 
-train_df_list, test_val_df_list = train_test_split(
-    df_list, test_size=0.3, random_state=1
-)
-val_df_list, test_df_list = train_test_split(
-    test_val_df_list, test_size=1 / 3, random_state=1
-)
+#train_df_list, test_val_df_list = train_test_split(
+#    df_list, test_size=0.3, random_state=1
+#)
+#val_df_list, test_df_list = train_test_split(
+#    test_val_df_list, test_size=1 / 3, random_state=1
+#)
 
-train_df = pd.concat(train_df_list)
-val_df = pd.concat(val_df_list)
-test_df = pd.concat(test_df_list)
+#train_df = pd.concat(train_df_list)
+#val_df = pd.concat(val_df_list)
+#test_df = pd.concat(test_df_list)
 
 # +
 """
@@ -104,8 +106,8 @@ def create_input_data(
     """
     Created a function to avoid triple code. Can be moved to div_methods.py
     """
-
-    y_dataset = y_dataset.reshape((len(y_dataset) * 2, 1))
+    # Scaling output arguments separately so they get the same importance in loss function
+    # y_dataset = y_dataset.reshape((len(y_dataset) * 2, 1))
     node_attr_dataset = abs(
         dataset_df[["inter_area_flow", "Area1_prod", "Area2_prod", "Area3_prod"]].values
     )
@@ -123,7 +125,7 @@ def create_input_data(
         node_attr_dataset = scale_node.transform(node_attr_dataset)
         edge_weights_dataset = scale_edge.transform(edge_weights_dataset)
 
-    y_dataset = y_dataset.reshape(int(len(y_dataset) / 2), 2)
+    #y_dataset = y_dataset.reshape(int(len(y_dataset) / 2), 2)
     node_attr_dataset = node_attr_dataset.reshape(int(len(node_attr_dataset) / 4), 4)
     edge_weights_dataset = edge_weights_dataset.reshape(
         int(len(edge_weights_dataset) / 4), 4
@@ -253,10 +255,10 @@ All these parameters are set based on visual inspection of convergence plot give
 
 """
 
-num_epochs = 80
+num_epochs = 100
 
 min_delta = 0.00001
-patience = 5
+patience = 10
 
 train_list = np.array([])
 val_list = np.array([])
@@ -265,7 +267,7 @@ previous_error_val = 0
 
 for epoch in range(1, num_epochs + 1):
     div.train_model(
-        model, training_dataset, optimizer, scheduler, criterion, is_rmse=is_rmse, output_dim=2
+        model, training_dataset, optimizer, scheduler, criterion, is_rmse=is_rmse, output_dim=2,
     )
     train_acc = div.test_model_regression(
         model, training_dataset, scale=scale_y, is_rmse=is_rmse, output_dim=2

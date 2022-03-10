@@ -26,6 +26,8 @@ Rest of columns are one-hot-encodings.
 
 """
 If running script from Notebook, do not define df here.
+
+NB: Commenting out this part, since the train and val sets are defined in classification have been used to train the model. Test sets are results from classification.
 """
 
 # df = pd.read_csv(r'data\tot_cost_failure_scenarios_041021_multicorr2.csv')
@@ -37,12 +39,12 @@ If set_max_cost = True, values higher than max_cost will be removed
 Or values higher than set_max can be set to set_max
 """
 
-set_max_cost = True
-max_cost = 1.128
+#set_max_cost = True
+#max_cost = 1.128
 
-if set_max_cost:
-    df = df[df["Total cost"] < max_cost]
-    # df.loc[df["Total cost"] > max_cost, "Total cost"] = max_cost
+#if set_max_cost:
+#    df = df[df["Total cost"] < max_cost]
+#    # df.loc[df["Total cost"] > max_cost, "Total cost"] = max_cost
 
 
 # +
@@ -53,25 +55,25 @@ random_state chooses seed for shuffling which gives more consistency for our pro
 Splitting into train and test set while keeping all scenarios with the same prev_id in the same set
 """
 
-prev_ids = df.prev_id.unique()
+#prev_ids = df.prev_id.unique()
 
-grouped = df.groupby(df.prev_id)
+#grouped = df.groupby(df.prev_id)
 
-df_list = []
-for prev_id in prev_ids:
-    df_list.append(grouped.get_group(prev_id))
+#df_list = []
+#for prev_id in prev_ids:
+#    df_list.append(grouped.get_group(prev_id))
 
 
-train_df_list, test_val_df_list = train_test_split(
-    df_list, test_size=0.3, random_state=1
-)
-val_df_list, test_df_list = train_test_split(
-    test_val_df_list, test_size=1 / 3, random_state=1
-)
+#train_df_list, test_val_df_list = train_test_split(
+#    df_list, test_size=0.3, random_state=1
+#)
+#val_df_list, test_df_list = train_test_split(
+#    test_val_df_list, test_size=1 / 3, random_state=1
+#)
 
-train_df = pd.concat(train_df_list)
-val_df = pd.concat(val_df_list)
-test_df = pd.concat(test_df_list)
+#train_df = pd.concat(train_df_list)
+#val_df = pd.concat(val_df_list)
+#test_df = pd.concat(test_df_list)
 
 # +
 """
@@ -220,7 +222,7 @@ is_third_layer: Boolean. If set to True, model will use 3 GCN layers.
 """
 
 
-is_rmse = False
+is_rmse = True
 is_third_layer = True
 
 # Hyperparameters: Set based on hyperparameteroptimisation.
@@ -230,7 +232,6 @@ learning_rate = 0.0075
 
 # Getting an example graph to get dimensions
 data_example = next(iter(training_dataset))
-
 
 model = div.GCN(
     data_example,
@@ -259,8 +260,8 @@ num_epochs : Number of epochs in training
 
 num_epochs = 80
 
-patience_value = 0.00000001
-patience_num = 5
+patience_value = 0.0001
+patience_num = 10
 
 train_list = np.array([])
 val_list = np.array([])
@@ -271,11 +272,11 @@ for epoch in range(1, num_epochs + 1):
     div.train_model(
         model, training_dataset, optimizer, scheduler, criterion, is_rmse=is_rmse
     )
-    train_acc = div.test_model(
-        model, training_dataset, batch_size=batch_size, scale=scale_y, calc_rmse=is_rmse
+    train_acc = div.test_model_regression(
+        model, training_dataset, scale=scale_y, is_rmse=is_rmse
     )
-    val_acc = div.test_model(
-        model, val_dataset, batch_size=batch_size, scale=scale_y, calc_rmse=is_rmse
+    val_acc = div.test_model_regression(
+        model, val_dataset, scale=scale_y, is_rmse=is_rmse
     )
     current_error_val = val_acc
     print(
@@ -297,10 +298,10 @@ for epoch in range(1, num_epochs + 1):
 """
 df_results return results for test data
 """
-test_acc = div.test_model(
-    model, test_dataset, batch_size=batch_size, scale=scale_y, calc_rmse=is_rmse
+test_acc = div.test_model_regression(
+    model, test_dataset, scale=scale_y, is_rmse=is_rmse
 )
-y_pred, y_prob, y_target, x_values = div.plotter(model, test_dataset)
+y_pred, y_target, x_values = div.plotter(model, test_dataset)
 
 y_pred = scale_y.inverse_transform(np.array(y_pred).reshape(1, -1))
 y_target = scale_y.inverse_transform(np.array(y_target).reshape(1, -1))
