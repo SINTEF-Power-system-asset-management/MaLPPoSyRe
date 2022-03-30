@@ -34,7 +34,7 @@ Classify scenario as high or low cost based on threshold.
 
 # thresh = 1.13
 
-df["Class"] = df.apply(lambda row: 0.0 if row["Total cost"] < thresh else 1.0, axis=1)
+# df["Class"] = df.apply(lambda row: 0.0 if row["Total cost"] < thresh else 1.0, axis=1)
 
 # +
 
@@ -46,26 +46,26 @@ Test dataset need to be large since this is what is used in regression model.
 
 Splitting into train and test set while keeping all scenarios with the same prev_id in the same set.
 """
+# Done in notenbook
+#prev_ids = df.prev_id.unique()
 
-prev_ids = df.prev_id.unique()
+#grouped = df.groupby(df.prev_id)
 
-grouped = df.groupby(df.prev_id)
-
-df_list = []
-for prev_id in prev_ids:
-    df_list.append(grouped.get_group(prev_id))
+#df_list = []
+#for prev_id in prev_ids:
+#    df_list.append(grouped.get_group(prev_id))
 
 
-train_df_list, test_val_df_list = train_test_split(
-    df_list, test_size=0.3, random_state=1
-)
-val_df_list, test_df_list = train_test_split(
-    test_val_df_list, test_size=1 / 3, random_state=1
-)
+#train_df_list, test_val_df_list = train_test_split(
+#    df_list, test_size=0.3, random_state=1
+#)
+#val_df_list, test_df_list = train_test_split(
+#    test_val_df_list, test_size=1 / 3, random_state=1
+#)
 
-train_df = pd.concat(train_df_list)
-val_df = pd.concat(val_df_list)
-test_df = pd.concat(test_df_list)
+#train_df = pd.concat(train_df_list)
+#val_df = pd.concat(val_df_list)
+#test_df = pd.concat(test_df_list)
 
 # +
 """
