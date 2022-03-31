@@ -1,10 +1,10 @@
 import pandas as pd
 
 # Import all needed dataframes
-df_flow = pd.read_csv("data/flow_280921.csv")
+df_flow = pd.read_csv("data/flow_300322.csv")
 #df_flow = pd.read_csv("data/prev_line_caps.csv")
-df_costs = pd.read_csv("data/costs_280921.csv")
-df_opf = pd.read_csv("data/opf_280921.csv", header=[0, 1])
+df_costs = pd.read_csv("data/costs_300322.csv")
+df_opf = pd.read_csv("data/opf_300322.csv", header=[0, 1])
 
 
 corr_cost_list = list(df_costs.columns)[4:]
@@ -121,6 +121,6 @@ merge3 = merge2[['prev_id', 'Line10', 'Line11', 'Line18', 'Line19', 'fault', 'co
        'Area1-fault2', 'Area2-fault2', 'Area3-fault2']].dropna()
 
 # Save as .csv-file
-#merge3.to_csv('data/tot_cost_failure_scenarios.csv', index = False)
+merge3.to_csv('data/tot_cost_failure_scenarios_300322.csv', index = False)
 
 
