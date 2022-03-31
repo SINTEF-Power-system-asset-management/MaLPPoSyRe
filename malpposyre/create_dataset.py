@@ -114,13 +114,7 @@ merge2["Area1-fault2"] = merge2["fault"].apply(lambda x: 0)
 merge2["Area2-fault2"] = merge2["fault"].apply(lambda x: 1 if x == "fault_L19" else 0)
 merge2["Area3-fault2"] = merge2["fault"].apply(lambda x: 1 if x == "fault_L19" else 0)
 
-merge3 = merge2[['prev_id', 'Line10', 'Line11', 'Line18', 'Line19', 'fault', 'corr',
-       'Dispatch costs', 'CENS', 'FCR cost', 'Redispatch cost', 'SPS cost',
-       'Correction cost', 'Total cost', 'Area1-corr', 'Area2-corr',
-       'Area3-corr', 'Area1-fault', 'Area2-fault', 'Area3-fault',
-       'Area1-fault2', 'Area2-fault2', 'Area3-fault2']].dropna()
-
 # Save as .csv-file
-merge3.to_csv('data/tot_cost_failure_scenarios_300322.csv', index = False)
+merge2.to_csv('data/tot_cost_failure_scenarios_300322.csv', index = False)
 
 
