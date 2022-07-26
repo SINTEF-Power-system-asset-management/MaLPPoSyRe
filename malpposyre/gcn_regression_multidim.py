@@ -217,8 +217,8 @@ is_third_layer = False
 
 # Hyperparameters: Set based on hyperparameteroptimisation.
 hidden_channels = 41
-dropout_rate = 0.35
-learning_rate = 0.0055
+dropout_rate = 0.25
+learning_rate = 0.0035
 
 # Getting an example graph to get dimensions
 data_example = next(iter(training_dataset))
@@ -295,17 +295,17 @@ for epoch in range(1, num_epochs + 1):
 """
 df_results return results for test data after transforming back.
 """
-test_acc = div.test_model_regression(
-    model, test_dataset, scale=scale_y, is_rmse=is_rmse, output_dim=2)
+#test_acc = div.test_model_regression(
+#    model, test_dataset, scale=scale_y, is_rmse=is_rmse, output_dim=2)
 
-y_pred, y_target, scenarios = div.plotter(model, test_dataset)
+#y_pred, y_target, scenarios = div.plotter(model, test_dataset)
 
-y_pred2 = scale_y.inverse_transform(np.array(y_pred).reshape(-1, 2))
-y_target2 = scale_y.inverse_transform(np.array(y_target).reshape(-1, 2))
+#y_pred2 = scale_y.inverse_transform(np.array(y_pred).reshape(-1, 2))
+#y_target2 = scale_y.inverse_transform(np.array(y_target).reshape(-1, 2))
 
-df_results = test_df.copy()
-df_results[["Dispatch_cost_target", "Correction_cost_target"]] = y_target2
-df_results[["Dispatch_cost_pred", "Correction_cost_pred"]] = y_pred2
+#df_results = test_df.copy()
+#df_results[["Dispatch_cost_target", "Correction_cost_target"]] = y_target2
+#df_results[["Dispatch_cost_pred", "Correction_cost_pred"]] = y_pred2
 # -
 
 # +
@@ -323,7 +323,7 @@ hyperparameter-settings with the lowest RMSE values.
 is_tuning: Boolean. If true script runs hyperparameteroptimalisation.
 """
 
-is_tuning = False
+#is_tuning = False
 
 if is_tuning:
     begin_time = datetime.datetime.now()
@@ -334,9 +334,6 @@ if is_tuning:
     hidden_channels_list = np.array([])
     dropout_rate_list = np.array([])
     epoch_list = np.array([])
-
-    min_delta = 0.000001
-    patience = 10
 
     for i in range(50):
         print(f"Execution time for {i - 1}: {datetime.datetime.now() - begin_time}")
@@ -361,6 +358,7 @@ if is_tuning:
         min_error_val = 0
         previous_error_val = 0
         for epoch in range(1, num_epochs + 1):
+            print(f'model: {i}, epoch: {epoch}')
             div.train_model(
                 model, training_dataset, optimizer, scheduler, criterion, is_rmse=is_rmse, output_dim=2
             )
